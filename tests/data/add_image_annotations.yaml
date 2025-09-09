@@ -1,0 +1,14 @@
+# example annotations for add-image cmd
+
+# for image-manifest
+vnd.tier4.pilot-auto.platform: "example-platform"
+vnd.tier4.pilot-auto.platform.ecu.hardware-model: "example-hardware-model"
+vnd.tier4.pilot-auto.platform.ecu.hardware-series: "example-hardware-series"
+vnd.tier4.pilot-auto.platform.ecu.architecture: "x86_64"
+
+# for image-config
+vnd.tier4.image.base-image: "ubuntu:22.04"
+vnd.tier4.image.os: "Ubuntu"
+vnd.tier4.image.os.version: "22.04"
+description: "Example OTA image with annotations for add-image cmd"
+created: "2025-07-15T15:43:32Z"
