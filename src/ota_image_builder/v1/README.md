@@ -1,1 +1,1 @@
-Support for OTA image specification version 1 
+Support for OTA image specification version 1
