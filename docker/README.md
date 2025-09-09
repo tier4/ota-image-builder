@@ -1,6 +1,6 @@
 # Build OTA Image Builder container image
 
-## 
+##
 
 ```
 sudo docker buildx create \
