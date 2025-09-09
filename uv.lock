@@ -238,24 +238,14 @@ name = "ota-image-builder"
 version = "0.0.23.dev0"
 source = { editable = "." }
 dependencies = [
-    { name = "ota-image-libs" },
-]
-
-[package.optional-dependencies]
-pinned = [
-    { name = "annotated-types" },
-    { name = "cffi" },
     { name = "cryptography" },
     { name = "msgpack" },
     { name = "ota-image-libs" },
-    { name = "pycparser" },
     { name = "pydantic" },
-    { name = "pydantic-core" },
     { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "simple-sqlite3-orm" },
     { name = "typing-extensions" },
-    { name = "typing-inspection" },
     { name = "zstandard" },
 ]
 
@@ -271,23 +261,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "annotated-types", marker = "extra == 'pinned'", specifier = "==0.7.0" },
-    { name = "cffi", marker = "extra == 'pinned'", specifier = "==1.17.1" },
-    { name = "cryptography", marker = "extra == 'pinned'", specifier = "==45.0.5" },
-    { name = "msgpack", marker = "extra == 'pinned'", specifier = "==1.1.1" },
-    { name = "ota-image-libs", url = "https://github.com/tier4/ota-image-libs/releases/download/v0.0.22-dev0/ota_image_libs-0.0.33.dev2-py3-none-any.whl" },
-    { name = "ota-image-libs", marker = "extra == 'pinned'", url = "https://github.com/tier4/ota-image-libs/releases/download/v0.0.22-dev0/ota_image_libs-0.0.33.dev2-py3-none-any.whl" },
-    { name = "pycparser", marker = "extra == 'pinned'", specifier = "==2.22" },
-    { name = "pydantic", marker = "extra == 'pinned'", specifier = "==2.11.7" },
-    { name = "pydantic-core", marker = "extra == 'pinned'", specifier = "==2.33.2" },
-    { name = "pyjwt", marker = "extra == 'pinned'", specifier = "==2.10.1" },
-    { name = "pyyaml", marker = "extra == 'pinned'", specifier = "==6.0.2" },
-    { name = "simple-sqlite3-orm", marker = "extra == 'pinned'", specifier = "==0.12.0" },
-    { name = "typing-extensions", marker = "extra == 'pinned'", specifier = "==4.14.1" },
-    { name = "typing-inspection", marker = "extra == 'pinned'", specifier = "==0.4.1" },
-    { name = "zstandard", marker = "extra == 'pinned'", specifier = "==0.23.0" },
+    { name = "cryptography", specifier = "~=45.0" },
+    { name = "msgpack", specifier = "~=1.1" },
+    { name = "ota-image-libs", url = "https://github.com/tier4/ota-image-libs/releases/download/v0.1.0/ota_image_libs-0.1.0-py3-none-any.whl" },
+    { name = "pydantic", specifier = ">=2.10,<3" },
+    { name = "pyjwt", specifier = "~=2.9" },
+    { name = "pyyaml", specifier = "==6.0.2" },
+    { name = "simple-sqlite3-orm", specifier = "~=0.12" },
+    { name = "typing-extensions", specifier = ">=4.6.3" },
+    { name = "zstandard", specifier = ">=0.22,<0.26" },
 ]
-provides-extras = ["pinned"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -301,8 +284,8 @@ dev = [
 
 [[package]]
 name = "ota-image-libs"
-version = "0.0.33.dev2"
-source = { url = "https://github.com/tier4/ota-image-libs/releases/download/v0.0.22-dev0/ota_image_libs-0.0.33.dev2-py3-none-any.whl" }
+version = "0.1.0"
+source = { url = "https://github.com/tier4/ota-image-libs/releases/download/v0.1.0/ota_image_libs-0.1.0-py3-none-any.whl" }
 dependencies = [
     { name = "cryptography" },
     { name = "msgpack" },
@@ -314,38 +297,20 @@ dependencies = [
     { name = "zstandard" },
 ]
 wheels = [
-    { url = "https://github.com/tier4/ota-image-libs/releases/download/v0.0.22-dev0/ota_image_libs-0.0.33.dev2-py3-none-any.whl", hash = "sha256:1fdc01144701a053d79c15028291c01f479d328a880a70a23405af4d2ea6e003" },
+    { url = "https://github.com/tier4/ota-image-libs/releases/download/v0.1.0/ota_image_libs-0.1.0-py3-none-any.whl", hash = "sha256:dbd74191c7f4ad4fb1fa334d8beb6557e316d4d92522cee0b0d3ea61ef7855f1" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "annotated-types", marker = "extra == 'pinned'", specifier = "==0.7.0" },
-    { name = "cffi", marker = "extra == 'pinned'", specifier = "==1.17.1" },
-    { name = "cryptography", specifier = "~=45.0" },
-    { name = "cryptography", marker = "extra == 'pinned'", specifier = "==45.0.5" },
-    { name = "msgpack", specifier = "~=1.1" },
-    { name = "msgpack", marker = "extra == 'pinned'", specifier = "==1.1.1" },
-    { name = "pycparser", marker = "extra == 'pinned'", specifier = "==2.22" },
+    { name = "cryptography", specifier = ">=45.0,<46" },
+    { name = "msgpack", specifier = ">=1.1,<2" },
     { name = "pydantic", specifier = ">=2.10,<3" },
-    { name = "pydantic", marker = "python_full_version >= '3.9' and extra == 'pinned'", specifier = "==2.11.7" },
-    { name = "pydantic", marker = "python_full_version < '3.9' and extra == 'pinned'", specifier = "==2.10.6" },
-    { name = "pydantic-core", marker = "python_full_version >= '3.9' and extra == 'pinned'", specifier = "==2.33.2" },
-    { name = "pydantic-core", marker = "python_full_version < '3.9' and extra == 'pinned'", specifier = "==2.27.2" },
     { name = "pyjwt", specifier = ">=2.9.0,<3" },
-    { name = "pyjwt", marker = "python_full_version >= '3.9' and extra == 'pinned'", specifier = "==2.10.1" },
-    { name = "pyjwt", marker = "python_full_version < '3.9' and extra == 'pinned'", specifier = "==2.9.0" },
     { name = "pyyaml", specifier = ">=6.0.1,<7" },
-    { name = "pyyaml", marker = "extra == 'pinned'", specifier = "==6.0.2" },
-    { name = "simple-sqlite3-orm", specifier = "~=0.12" },
-    { name = "simple-sqlite3-orm", marker = "extra == 'pinned'", specifier = "==0.12.0" },
+    { name = "simple-sqlite3-orm", specifier = ">=0.12,<1" },
     { name = "typing-extensions", specifier = ">=4.6.3" },
-    { name = "typing-extensions", marker = "python_full_version >= '3.9' and extra == 'pinned'", specifier = "==4.14.0" },
-    { name = "typing-extensions", marker = "python_full_version < '3.9' and extra == 'pinned'", specifier = "==4.13.2" },
-    { name = "typing-inspection", marker = "python_full_version >= '3.9' and extra == 'pinned'", specifier = "==0.4.1" },
-    { name = "zstandard", specifier = ">=0.22,<0.24" },
-    { name = "zstandard", marker = "extra == 'pinned'", specifier = "==0.23.0" },
+    { name = "zstandard", specifier = ">=0.22,<0.26" },
 ]
-provides-extras = ["pinned"]
 
 [[package]]
 name = "packaging"
