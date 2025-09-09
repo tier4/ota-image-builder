@@ -2,14 +2,14 @@
 
 ##
 
-```
+```shell
 sudo docker buildx create \
   --name container-builder \
   --driver docker-container \
   --bootstrap --use
 ```
 
-```
+```shell
 VERSION=0.0.21-dev0
 BASE_URI=ghcr.io/tier4/ota-image-builder/ota-image-builder
 sudo docker build \
