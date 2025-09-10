@@ -256,7 +256,6 @@ def sign_cmd(args: Namespace) -> None:
         logger.debug(f"failed to sign the image: {e}", exc_info=e)
         exit_with_err_msg(f"failed to sign the image: {e}")
 
-    sign_cert_f = loaded_cert_chain.ee
     if args.legacy_compat:
         logger.info(
             "Enable legacy OTA image compatibility, "
@@ -264,12 +263,13 @@ def sign_cmd(args: Namespace) -> None:
         )
         _add_compat_to_image(
             image_root,
-            cert_bytes=sign_cert_f.tbs_certificate_bytes,
+            cert_bytes=sign_cert_f.read_bytes(),
             sign_key=sign_key,
             sign_key_passwd=sign_key_passwd,
         )
 
+    sign_cert = loaded_cert_chain.ee
     print(
         "OTA Image is signed successfully!\n"
-        f"{sign_cert_f.subject=}\n{sign_cert_f.not_valid_before_utc=}\n{sign_cert_f.not_valid_after_utc=}"
+        f"{sign_cert.subject=}\n{sign_cert.not_valid_before_utc=}\n{sign_cert.not_valid_after_utc=}"
     )
