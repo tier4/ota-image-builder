@@ -133,7 +133,13 @@ def _generate_dummy_metadata_jwt(
             hashes.SHA256(),
         ),
     )
-    return f"{_header_b64_encoded.decode('utf-8')}.{_payload_b64_encoded.decode('utf-8')}.{_sign_b64_encoded.decode('utf-8')}"
+    return ".".join(
+        [
+            _header_b64_encoded.decode("utf-8"),
+            _payload_b64_encoded.decode("utf-8"),
+            _sign_b64_encoded.decode("utf-8"),
+        ]
+    )
 
 
 def _add_compat_to_image(
