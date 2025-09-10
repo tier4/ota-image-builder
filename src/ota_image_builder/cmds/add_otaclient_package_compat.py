@@ -72,7 +72,8 @@ def add_otaclient_package_compat_cmd(args: Namespace) -> None:
         exit_with_err_msg(f"{release_dir} doesn't exist.")
 
     logger.info(
-        f"Will try to add otaclient release package from {release_dir} to OTA image at {image_root} ..."
+        "Will try to add otaclient release package "
+        f"from {release_dir} to OTA image at {image_root} following legacy OTA image spec ..."
     )
     shutil.copytree(
         release_dir, image_root / OTACLIENT_RELEASE_DIR_LEGACY, dirs_exist_ok=True
