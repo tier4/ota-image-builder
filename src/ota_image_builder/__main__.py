@@ -22,9 +22,13 @@ if __name__ == "__main__":
     freeze_support()
 
 if __name__ == "__main__":
+    from ota_image_builder._common import configure_logging
+
+    configure_logging()
+
     # special treatment when the program is called with name ota_image_tools.
     _cli_name = os.path.basename(sys.argv[0])
-    if _cli_name.replace("-", "_") == OTA_IMAGE_TOOLS:
+    if _cli_name.replace("-", "_").startswith(OTA_IMAGE_TOOLS):
         import ota_image_tools.__main__ as _ota_image_tool_cli
 
         # NOTE: the __main__ module will be executed at import time
