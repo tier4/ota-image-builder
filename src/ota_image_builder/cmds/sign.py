@@ -198,7 +198,7 @@ def sign_cmd_args(
     )
     sign_cmd_arg_parser.add_argument(
         "--force-sign",
-        help="If specified, fore signing an already signed OTA image.",
+        help="If specified, force signing an already signed OTA image.",
         action="store_true",
     )
     sign_cmd_arg_parser.add_argument(
