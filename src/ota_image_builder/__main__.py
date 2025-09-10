@@ -29,10 +29,9 @@ if __name__ == "__main__":
     # special treatment when the program is called with name ota_image_tools.
     _cli_name = os.path.basename(sys.argv[0])
     if _cli_name.replace("-", "_").startswith(OTA_IMAGE_TOOLS):
-        import ota_image_tools.__main__ as _ota_image_tool_cli
+        from ota_image_tools.__main__ import main
 
-        # NOTE: the __main__ module will be executed at import time
-        _ = _ota_image_tool_cli
+        main()
 
     else:
         from ota_image_builder.main import main
