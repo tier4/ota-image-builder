@@ -78,6 +78,10 @@ def sign_image(
     _index_jwt_f.write_text(_index_jwt)
 
 
+#
+# ------ Legacy OTA Image compatibility support ------ #
+#
+
 METADATA_JWT_FNAME = "metadata.jwt"
 CERTIFICATE_FNAME = "certificate.pem"
 
@@ -150,6 +154,9 @@ def _add_compat_to_image(
             sign_key_passwd=sign_key_passwd,
         )
     )
+
+
+# ------------------------ #
 
 
 def sign_cmd_args(
@@ -245,7 +252,7 @@ def sign_cmd(args: Namespace) -> None:
     if args.legacy_compat:
         logger.info(
             "Enable legacy OTA image compatibility, "
-            "writing dummy metadata.jwt into OTA image ..."
+            "writing signed dummy metadata.jwt into OTA image ..."
         )
         _add_compat_to_image(
             image_root,
