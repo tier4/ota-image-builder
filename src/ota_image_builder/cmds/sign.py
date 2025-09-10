@@ -201,7 +201,7 @@ def sign_cmd_args(
     )
     sign_cmd_arg_parser.add_argument(
         "--legacy-compat",
-        help="Is specified, a signed dummy metadata.jwt will be generated. "
+        help="If specified, a signed dummy metadata.jwt will be generated. "
         "This option is only meaningful when add-otaclient-package-compat has been called once.",
         action="store_true",
     )
