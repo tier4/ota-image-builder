@@ -12,11 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import sys
 from multiprocessing import freeze_support
+
+OTA_IMAGE_TOOLS = "ota_image_tools"
 
 if __name__ == "__main__":
     freeze_support()
 
-    from ota_image_builder.main import main
+if __name__ == "__main__":
+    # special treatment when the program is called with name ota_image_tools.
+    _cli_name = os.path.basename(sys.argv[0])
+    if _cli_name.replace("-", "_") == OTA_IMAGE_TOOLS:
+        import ota_image_tools.__main__ as _ota_image_tool_cli
 
-    main()
+        # NOTE: the __main__ module will be executed at import time
+        _ = _ota_image_tool_cli
+
+    else:
+        from ota_image_builder.main import main
+
+        main()
