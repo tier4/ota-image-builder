@@ -53,9 +53,13 @@ def add_otaclient_package_compat_cmd_args(
         "image_root",
         help="The folder of the OTA image we will add new system rootfs image to.",
     )
-    add_otaclient_package_arg_parser.set_defaults(handler=add_otaclient_package_compat_cmd)
+    add_otaclient_package_arg_parser.set_defaults(
+        handler=add_otaclient_package_compat_cmd
+    )
+
 
 OTACLIENT_RELEASE_DIR_LEGACY = "data/opt/ota/otaclient_release"
+
 
 def add_otaclient_package_compat_cmd(args: Namespace) -> None:
     logger.debug(f"calling {add_otaclient_package_compat_cmd.__name__} with {args}")
@@ -70,4 +74,6 @@ def add_otaclient_package_compat_cmd(args: Namespace) -> None:
     logger.info(
         f"Will try to add otaclient release package from {release_dir} to OTA image at {image_root} ..."
     )
-    shutil.copytree(release_dir, image_root / OTACLIENT_RELEASE_DIR_LEGACY, dirs_exist_ok=True)
+    shutil.copytree(
+        release_dir, image_root / OTACLIENT_RELEASE_DIR_LEGACY, dirs_exist_ok=True
+    )
