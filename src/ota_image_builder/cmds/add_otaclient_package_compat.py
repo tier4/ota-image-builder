@@ -40,7 +40,7 @@ def add_otaclient_package_compat_cmd_args(
     add_otaclient_package_arg_parser = sub_arg_parser.add_parser(
         name="add-otaclient-package-legacy-compat",
         help="Add an otaclient release package into OTA image, but following legacy OTA image spec.",
-        description="With this compatiblity, otaclient(>=3.10) but doesn't support new OTA image spec can still "
+        description="With this compatibility, otaclient(>=3.10) but doesn't support new OTA image spec can still "
         "use new OTA image to update itself to newer version that support new OTA image spec.",
         parents=parent_parser,
     )
