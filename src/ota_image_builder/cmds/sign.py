@@ -128,7 +128,7 @@ def _generate_dummy_metadata_jwt(
         ).encode()
     )
     _sign_b64_encoded = _loaded_priv_key.sign(
-        _header_b64_encoded,
+        b".".join([_header_b64_encoded, _payload_b64_encoded]),
         signature_algorithm=ec.ECDSA(
             hashes.SHA256(),
         ),
