@@ -8,8 +8,10 @@ requires = [
 name = "ota-image-builder"
 description = "OTA Image Builder."
 dynamic = ["optional-dependencies"]
-version = "0.0.23-dev0"
-readme = "README.md"
+version = "0.1.0"
+# unfortunately, up to 20250909, dependabot has a bug
+#   that prevents it from working when readme is specified.
+# readme = "README.md"
 license = "Apache-2.0"
 license-files = [
     "LICENSE",
@@ -23,7 +25,18 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "ota-image-libs@https://github.com/tier4/ota-image-libs/releases/download/v0.0.22-dev0/ota_image_libs-0.0.33.dev2-py3-none-any.whl#sha256:1fdc01144701a053d79c15028291c01f479d328a880a70a23405af4d2ea6e003",
+    "ota-image-libs@https://github.com/tier4/ota-image-libs/releases/download/v0.1.0/ota_image_libs-0.1.0-py3-none-any.whl#sha256:dbd74191c7f4ad4fb1fa334d8beb6557e316d4d92522cee0b0d3ea61ef7855f1",
+    # via ota-image-libs, unfortunately github cannot see through indirect deps
+    #   introduced via dep specified by wheel package.
+    # based on ota-image-libs deps, add more restrictions to version range.
+    "cryptography~=45.0",
+    "msgpack~=1.1",
+    "pydantic>=2.10,<3",
+    "pyjwt~=2.9",
+    "pyyaml==6.0.2",
+    "simple-sqlite3-orm~=0.12",
+    "typing-extensions>=4.6.3",
+    "zstandard>=0.22,<0.26",
 ]
 urls.Source = "https://github.com/tier4/ota-image-builder"
 
@@ -73,11 +86,11 @@ ignore = [
     "scripts",
 ]
 typeCheckingMode = "standard"
-pythonVersion = "3.12"
+pythonVersion = "3.13"
 
 [tool.ruff]
 line-length = 88
-target-version = "py312"
+target-version = "py313"
 # NOTE: not include tests and tools for now
 include = [
     "tests/**/*.py",
