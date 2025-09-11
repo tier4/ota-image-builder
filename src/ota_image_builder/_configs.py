@@ -29,7 +29,7 @@ class ImageBuilderConfig:
     # files with size less than 4KiB are mostly text files, which can
     #   be compressed efficiently(down to 10% of origin size), so
     #   increase the bundle size to 256MiB
-    BUNDLE_MAX_SIZE = 200 * 1024**2  # 256MiB
+    BUNDLE_MAX_SIZE = 200 * 1024**2  # 200MiB
 
     COMPRESSION_LOWER_THRESHOLD = 1024  # bytes
     COMPRESSION_MIN_RATIO = 1.25
