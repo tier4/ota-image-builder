@@ -28,8 +28,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+REPORT_BATCH_SIZE = 10_000
+
 
 def _pack_artifact(_image_root: Path, _output: Path):
+    _file_count = 0
     with ZipFile(_output, mode="w", compression=ZIP_STORED) as output_f:
         for curdir, _, files in os.walk(_image_root):
             curdir = Path(curdir)
@@ -38,6 +41,10 @@ def _pack_artifact(_image_root: Path, _output: Path):
             output_f.mkdir(str(relative_curdir), mode=0o755)
             for _file in files:
                 output_f.write(curdir / _file)
+                _file_count += 1
+
+                if _file_count % REPORT_BATCH_SIZE == 0:
+                    print(f"Packing in-progress: {_file_count} files are packed ...")
 
 
 def pack_artifact_cmd_args(
