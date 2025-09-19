@@ -40,7 +40,7 @@ def _pack_artifact(_image_root: Path, _output: Path):
 
             output_f.mkdir(str(relative_curdir), mode=0o755)
             for _file in files:
-                output_f.write(curdir / _file)
+                output_f.write(filename=curdir / _file, arcname=relative_curdir / _file)
                 _file_count += 1
 
                 if _file_count % REPORT_BATCH_SIZE == 0:
@@ -58,6 +58,7 @@ def pack_artifact_cmd_args(
     )
     pack_artifact_arg_parser.add_argument(
         "-o",
+        "--output",
         help="The location to output the ZIP archive to.",
         required=True,
     )
@@ -71,7 +72,7 @@ def pack_artifact_cmd_args(
 def pack_artifact_cmd(args: Namespace) -> None:
     logger.debug(f"calling {pack_artifact_cmd.__name__} with {args}")
     image_root = Path(args.image_root)
-    output = Path(args.o)
+    output = Path(args.output)
     if output.exists():
         exit_with_err_msg(f"{output} already exists!")
     print(f"Will output the ZIP archive to {output}.")
