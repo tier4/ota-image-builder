@@ -50,6 +50,7 @@ def _pack_artifact(_image_root: Path, _output: Path):
             for _file in files:
                 _src = curdir / _file
                 _relative_src = relative_curdir / _file
+
                 _src_zipinfo = ZipInfo.from_file(
                     filename=_src, arcname=str(_relative_src)
                 )
