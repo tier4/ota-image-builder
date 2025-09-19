@@ -47,7 +47,10 @@ def _pack_artifact(_image_root: Path, _output: Path):
                     filename=_src, arcname=str(_relative_src)
                 )
                 _src_zipinfo.date_time = DEFAULT_TIMESTAMP
-
+                _src_zipinfo.compress_type = output_f.compression
+                _src_zipinfo.compress_level = output_f.compresslevel
+                # NOTE: for OTA image, we have regulated the file size(less than 32MiB pre-blob),
+                #       so just directly read the whole chunk is not a problem.
                 output_f.writestr(_src_zipinfo, _src.read_bytes())
                 _file_count += 1
 
