@@ -39,7 +39,14 @@ def _pack_artifact(_image_root: Path, _output: Path):
             curdir = Path(curdir)
             relative_curdir = curdir.relative_to(_image_root)
 
-            output_f.mkdir(str(relative_curdir), mode=0o755)
+            _curdir_zipinfo = ZipInfo.from_file(
+                filename=f"{str(curdir).rstrip('/')}/",
+                arcname=f"{str(relative_curdir).rstrip('/')}/",
+            )
+            _curdir_zipinfo.CRC = 0
+            _curdir_zipinfo.date_time = DEFAULT_TIMESTAMP
+            output_f.mkdir(_curdir_zipinfo, mode=0o755)
+
             for _file in files:
                 _src = curdir / _file
                 _relative_src = relative_curdir / _file
