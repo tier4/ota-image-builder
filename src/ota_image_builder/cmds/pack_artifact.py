@@ -47,7 +47,7 @@ def _pack_artifact(_image_root: Path, _output: Path):
             _curdir_zipinfo.date_time = DEFAULT_TIMESTAMP
             output_f.mkdir(_curdir_zipinfo, mode=0o755)
 
-            for _file in files:
+            for _file in sorted(files):
                 _src = curdir / _file
                 _relative_src = relative_curdir / _file
 
