@@ -18,7 +18,7 @@ import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
-from zipfile import ZIP_STORED, ZipFile
+from zipfile import ZIP_STORED, ZipFile, ZipInfo
 
 from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
 
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 REPORT_BATCH_SIZE = 10_000
+DEFAULT_TIMESTAMP = (2009, 1, 1, 0, 0, 0)
 
 
 def _pack_artifact(_image_root: Path, _output: Path):
@@ -40,7 +41,14 @@ def _pack_artifact(_image_root: Path, _output: Path):
 
             output_f.mkdir(str(relative_curdir), mode=0o755)
             for _file in files:
-                output_f.write(filename=curdir / _file, arcname=relative_curdir / _file)
+                _src = curdir / _file
+                _relative_src = relative_curdir / _file
+                _src_zipinfo = ZipInfo.from_file(
+                    filename=_src, arcname=str(_relative_src)
+                )
+                _src_zipinfo.date_time = DEFAULT_TIMESTAMP
+
+                output_f.writestr(_src_zipinfo, _src.read_bytes())
                 _file_count += 1
 
                 if _file_count % REPORT_BATCH_SIZE == 0:
