@@ -29,6 +29,7 @@ from ota_image_builder.cmds import (
     add_otaclient_package_compat_cmd_args,
     finalize_cmd_args,
     init_cmd_args,
+    pack_artifact_cmd_args,
     prepare_sysimg_cmd_args,
     sign_cmd_args,
 )
@@ -92,6 +93,7 @@ def main():
     add_otaclient_package_compat_cmd_args(sub_arg_parser)
     finalize_cmd_args(sub_arg_parser)
     sign_cmd_args(sub_arg_parser)
+    pack_artifact_cmd_args(sub_arg_parser)
 
     # ------ top-level args parsing ----- #
     args = arg_parser.parse_args()
