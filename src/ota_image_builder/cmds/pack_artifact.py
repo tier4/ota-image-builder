@@ -71,7 +71,11 @@ def pack_artifact_cmd_args(
 ) -> None:
     pack_artifact_arg_parser = sub_arg_parser.add_parser(
         name="pack-artifact",
-        help=(_help_txt := "Pack OTA image into one ZIP archive."),
+        help=(
+            _help_txt
+            := "Pack OTA image into one ZIP archive. This cmd implements reproducible build, "
+            "for the same OTA image input, the output artifact is always the same."
+        ),
         description=_help_txt,
         parents=parent_parser,
     )
