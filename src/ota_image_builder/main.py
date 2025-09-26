@@ -25,12 +25,14 @@ from ota_image_libs import version as ota_image_libs_version
 
 from ota_image_builder.cmds import (
     add_image_cmd_args,
+    add_otaclient_package_cmd_args,
+    add_otaclient_package_compat_cmd_args,
     finalize_cmd_args,
     init_cmd_args,
+    pack_artifact_cmd_args,
     prepare_sysimg_cmd_args,
     sign_cmd_args,
 )
-from ota_image_builder.cmds.add_otaclient_package import add_otaclient_package_cmd_args
 
 from ._common import configure_logging
 from ._version import version
@@ -80,7 +82,7 @@ def main():
     )
     version_cmd.set_defaults(
         handler=lambda _: print(
-            f"ota-image-builder v{version} (Based on ota-image-builder-lib v{ota_image_libs_version})"
+            f"ota-image-builder v{version} (Built with ota-image-lib v{ota_image_libs_version})"
         )
     )
 
@@ -88,8 +90,10 @@ def main():
     init_cmd_args(sub_arg_parser)
     add_image_cmd_args(sub_arg_parser)
     add_otaclient_package_cmd_args(sub_arg_parser)
+    add_otaclient_package_compat_cmd_args(sub_arg_parser)
     finalize_cmd_args(sub_arg_parser)
     sign_cmd_args(sub_arg_parser)
+    pack_artifact_cmd_args(sub_arg_parser)
 
     # ------ top-level args parsing ----- #
     args = arg_parser.parse_args()

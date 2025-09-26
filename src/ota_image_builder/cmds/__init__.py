@@ -14,8 +14,10 @@
 
 from .add_image import add_image_cmd_args
 from .add_otaclient_package import add_otaclient_package_cmd_args
+from .add_otaclient_package_compat import add_otaclient_package_compat_cmd_args
 from .finalize import finalize_cmd_args
 from .init import init_cmd_args
+from .pack_artifact import pack_artifact_cmd_args
 from .prepare_sysimg import prepare_sysimg_cmd_args
 from .sign import sign_cmd_args
 
@@ -25,5 +27,7 @@ __all__ = [
     "sign_cmd_args",
     "finalize_cmd_args",
     "add_otaclient_package_cmd_args",
+    "add_otaclient_package_compat_cmd_args",
     "prepare_sysimg_cmd_args",
+    "pack_artifact_cmd_args",
 ]

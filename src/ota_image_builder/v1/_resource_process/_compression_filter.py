@@ -62,7 +62,6 @@ class CompressionFilterProcesser:
         zstd_compression_level: int = cfg.ZSTD_COMPRESSION_LEVEL,
         read_size: int = cfg.READ_SIZE,
         worker_threads: int = cfg.COMPRESSION_RESOURCE_SCAN_WORKER_THREADS,
-        zstd_multi_threads: int = cfg.COMPRESSION_ZSTD_MULTI_THTHREADS,
         concurrent_jobs: int = cfg.COMPRESSION_MAX_CONCURRENT,
     ) -> None:
         self._read_size = read_size
@@ -71,7 +70,6 @@ class CompressionFilterProcesser:
         self._lower_bound = size_lower_bound
         self._compression_ratio_threshold = compression_ratio_threshold
 
-        self._zstd_multi_threads = zstd_multi_threads
         self._zstd_compression_level = zstd_compression_level
 
         self._worker_thread_local = threading.local()
@@ -85,9 +83,7 @@ class CompressionFilterProcesser:
 
     def _thread_worker_initializer(self) -> None:
         thread_local = self._worker_thread_local
-        thread_local.cctx = zstandard.ZstdCompressor(
-            level=self._zstd_compression_level, threads=self._zstd_multi_threads
-        )
+        thread_local.cctx = zstandard.ZstdCompressor(level=self._zstd_compression_level)
 
     # ------ worker thread workload ------ #
 
