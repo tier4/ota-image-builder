@@ -140,6 +140,7 @@ class BundleFilterProcesser:
             # ------ post generating bundle ------ #
             bundle_digest = bundle_hasher.digest()
             bundle_size = offset
+            logger.info("finish creating bundle, start to apply compression to the bundle ...")
 
             # ------ directly zstd compress the bundle  ------ #
             _tmp_compressed_bundle = self._resource_dir / tmp_fname()
