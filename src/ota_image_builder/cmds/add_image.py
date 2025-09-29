@@ -331,7 +331,10 @@ def add_image_cmd(args: Namespace) -> None:
             resource_dir=resource_dir,
             remove_origin=True,
         )
-        logger.info("Update the resource_table in the OTA image ...")
+        logger.info(
+            "Update the resource_table in the OTA image: \n"
+            f"New resource_table blob: {_new_rst_descriptor.digest}"
+        )
         index_helper.image_index.update_resource_table(_new_rst_descriptor)
 
         if (
@@ -339,11 +342,9 @@ def add_image_cmd(args: Namespace) -> None:
             and _old_rst_descriptor.digest != _new_rst_descriptor.digest
         ):
             logger.info(
-                "Update the resource_table blob as updated: \n"
-                f"Old resource_table blob: {_old_rst_descriptor.digest}\n"
-                f"New resource_table blob: {_new_rst_descriptor.digest}"
+                "Remove the old resource_table blob as the new one is added: \n"
+                f"Old resource_table blob: {_old_rst_descriptor.digest}"
             )
-            logger.debug("Removing old resource_table from resource_dir ...")
             _old_rst_descriptor.remove_blob_from_resource_dir(resource_dir)
 
         logger.info("Sync index.json on finishing up adding image payload.")
