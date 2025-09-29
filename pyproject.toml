@@ -8,7 +8,7 @@ requires = [
 name = "ota-image-builder"
 description = "OTA Image Builder."
 dynamic = ["optional-dependencies"]
-version = "0.3.1"
+version = "0.3.2"
 # unfortunately, up to 20250909, dependabot has a bug
 #   that prevents it from working when readme is specified.
 # readme = "README.md"
@@ -25,7 +25,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "ota-image-libs@https://github.com/tier4/ota-image-libs/releases/download/v0.2.0/ota_image_libs-0.2.0-py3-none-any.whl",
+    "ota-image-libs@https://github.com/tier4/ota-image-libs/releases/download/v0.2.1/ota_image_libs-0.2.1-py3-none-any.whl",
     # via ota-image-libs, unfortunately github cannot see through indirect deps
     #   introduced via dep specified by wheel package.
     # based on ota-image-libs deps, add more restrictions to version range.

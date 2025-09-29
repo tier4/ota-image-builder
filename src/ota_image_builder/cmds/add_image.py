@@ -324,17 +324,27 @@ def add_image_cmd(args: Namespace) -> None:
             )
             index_helper.image_index.add_image(image_manifest_descriptor)
 
-        # NOTE that we will do the zstd compression when finalizing the OTA image.
-        logger.info("Update the resource_table in the OTA image ...")
-        index_helper.image_index.update_resource_table(
-            ResourceTableDescriptor.add_file_to_resource_dir(
-                rst_dbf,
-                resource_dir=resource_dir,
-                remove_origin=True,
-            )
+        # NOTE that we will do the zstd compression when finalizing the OTA image, so
+        #   not applying zstd compression yet here.
+        _new_rst_descriptor = ResourceTableDescriptor.add_file_to_resource_dir(
+            rst_dbf,
+            resource_dir=resource_dir,
+            remove_origin=True,
         )
-        if _old_rst_descriptor:
-            logger.debug("Removing old resource_table from resource_dir ...")
+        logger.info(
+            "Update the resource_table in the OTA image: \n"
+            f"New resource_table blob: {_new_rst_descriptor.digest}"
+        )
+        index_helper.image_index.update_resource_table(_new_rst_descriptor)
+
+        if (
+            _old_rst_descriptor
+            and _old_rst_descriptor.digest != _new_rst_descriptor.digest
+        ):
+            logger.info(
+                "Remove the old resource_table blob as the new one is added: \n"
+                f"Old resource_table blob: {_old_rst_descriptor.digest}"
+            )
             _old_rst_descriptor.remove_blob_from_resource_dir(resource_dir)
 
         logger.info("Sync index.json on finishing up adding image payload.")
