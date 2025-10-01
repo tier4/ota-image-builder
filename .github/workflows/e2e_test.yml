@@ -36,7 +36,7 @@ jobs:
         run: |
           docker run -it --rm \
             -v `pwd`/docker/e2e_test_base/e2e_test.sh:/entry_point.sh:ro \
-            -v `pwd`/tests/certs/gen_cert_chain.sh:/certs/gen_certs.sh:ro \
+            -v `pwd`/tests/certs/gen_cert_chain.sh:/certs/gen_cert_chain.sh:ro \
             -v `pwd`/tests/data:/workdir:ro \
             -w /workdir \
             --entrypoint=/bin/bash \

@@ -9,7 +9,7 @@ SYS_IMG_ROOTFS=${SYS_IMG_ROOTFS:-/rootfs}
 # gen cert chain
 mkdir -p ${CERT_DIR}
 pushd ${CERT_DIR}
-bash ${CERT_DIR}/gen_certs.sh
+bash ${CERT_DIR}/gen_cert_chain.sh
 popd
 
 # TODO: add otaclient release package
