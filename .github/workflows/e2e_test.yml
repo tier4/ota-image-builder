@@ -1,0 +1,47 @@
+name: E2E test CI
+
+permissions:
+  contents: read
+  packages: read
+  actions: read
+
+on:
+  pull_request:
+    branches:
+      - main
+      - v*
+  push:
+    branches:
+      - main
+      - v*
+    paths:
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/test.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
+  # allow the test CI to be manually triggerred
+  workflow_dispatch:
+
+jobs:
+  pytest_with_coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout commit
+        uses: actions/checkout@v5
+        # sonarcloud needs full git histories
+        with:
+          fetch-depth: 0
+      - name: Build test base container image
+        run: |
+          docker build -f docker/e2e_test_base -t e2e_test_base .
+      - name: E2E test
+        run: |
+          docker run -it --rm \
+            -v `pwd`/docker/e2e_test_base/e2e_test.sh:/entry_point.sh:ro \
+            -v `pwd`/tests/data:/workdir:ro \
+            -w /workdir \
+            --entrypoint=/bin/bash /entry_point.sh \
+            e2e_test_base
+      
