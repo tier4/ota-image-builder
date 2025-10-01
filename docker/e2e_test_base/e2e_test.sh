@@ -19,12 +19,14 @@ ota-image-builder -d add-image \
     --annotations-file full_annotations.yaml \
     --release-key dev \
     --sys-config "autoware:sys_config.yaml" \
+    --sys-config "sub:sys_config.yaml" \
     --rootfs ${SYS_IMG_ROOTFS} \
     ${OTA_IMAGE_DIR}
 ota-image-builder -d add-image \
     --annotations-file full_annotations.yaml \
     --release-key prd \
     --sys-config "autoware:sys_config.yaml" \
+    --sys-config "sub:sys_config.yaml" \
     --rootfs ${SYS_IMG_ROOTFS}/var \
     ${OTA_IMAGE_DIR}
 ota-image-builder -d finalize ${OTA_IMAGE_DIR}
