@@ -33,7 +33,7 @@ dependencies = [
     "msgpack~=1.1",
     "pydantic>=2.10,<3",
     "pyjwt~=2.9",
-    "pyyaml==6.0.2",
+    "pyyaml==6.0.3",
     "simple-sqlite3-orm~=0.12",
     "typing-extensions>=4.6.3",
     "zstandard>=0.22,<0.26",
