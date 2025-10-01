@@ -35,12 +35,12 @@ jobs:
           fetch-depth: 0
       - name: Build test base container image
         run: |
-          docker build -f docker/e2e_test_base -t e2e_test_base .
+          docker build -f docker/e2e_test_base/Dockerfile -t e2e_test_base .
       - name: E2E test
         run: |
           docker run -it --rm \
             -v `pwd`/docker/e2e_test_base/e2e_test.sh:/entry_point.sh:ro \
             -v `pwd`/tests/data:/workdir:ro \
             -w /workdir \
-            --entrypoint=/bin/bash /entry_point.sh \
-            e2e_test_base
+            --entrypoint=/bin/bash \
+            e2e_test_base /entry_point.sh

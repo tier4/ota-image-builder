@@ -1,5 +1,5 @@
-# copied from otaclient repo
 #!/bin/bash
+# copied from otaclient repo
 
 # https://stackoverflow.com/questions/52500165/problem-verifying-a-self-created-openssl-root-intermediate-and-end-user-certifi
 

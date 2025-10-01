@@ -5,8 +5,8 @@ set -eux
 OTA_IMAGE_DIR=/ota-image
 
 # gen cert chain
-pushd ${CERTS_DIR}
-bash ${CERTS_DIR}/gen_cert_chain.sh
+pushd ${CERT_DIR}
+bash ${CERT_DIR}/gen_certs.sh
 popd
 
 # TODO: add otaclient release package
@@ -31,10 +31,10 @@ ota-image-builder -d add-image \
     ${OTA_IMAGE_DIR}
 ota-image-builder -d finalize ${OTA_IMAGE_DIR}
 ota-image-builder -d sign \
-    --sign-cert ${CERTS_DIR}/sign.pem \
-    --sign-key ${CERTS_DIR}/sign.key \
-    --ca-cert ${CERTS_DIR}/test.interm.pem \
+    --sign-cert ${CERT_DIR}/sign.pem \
+    --sign-key ${CERT_DIR}/sign.key \
+    --ca-cert ${CERT_DIR}/test.interm.pem \
     ${OTA_IMAGE_DIR}
-rm -rf ${CERTS_DIR}/*.key
+rm -rf ${CERT_DIR}/*.key
 
 ota-image-tools inspect-index ${OTA_IMAGE_DIR}
