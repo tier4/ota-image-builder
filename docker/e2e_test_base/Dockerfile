@@ -42,7 +42,7 @@ RUN set -eux; \
     apt-get install -y -qq --no-install-recommends \
         openssl; \
     apt-get clean; \
-    rm -rf; \
+    rm -rf \
         /tmp/* \
         /var/lib/apt/lists/* \
         /var/tmp/*
