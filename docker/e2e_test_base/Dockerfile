@@ -11,14 +11,17 @@ FROM ${SYS_IMG} AS sys_img
 FROM ${UBUNTU_BASE} AS app_builder
 
 # copy minimum required files for build
-COPY ./src ./pyproject.toml ./.python-version ./uv.lock /project/
+COPY ./pyproject.toml ./.python-version ./uv.lock /project/
+COPY ./src /project/src
+
+ARG UV_VERSION
 
 WORKDIR /project
 
 RUN set -eux; \
     apt-get update; \
     apt-get install -y -qq --no-install-recommends \
-        git ca-certificates wget python3 python3-setuptools; \
+        git binutils ca-certificates wget python3 python3-setuptools; \
     export UV_INSTALL_DIR=/usr/bin; \
     wget -qO- "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh; \
     uv run --locked pyinstaller -s -F --optimize=2 \
