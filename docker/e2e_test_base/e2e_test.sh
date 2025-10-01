@@ -6,7 +6,7 @@ OTA_IMAGE_DIR=/ota-image
 
 # gen cert chain
 pushd ${CERTS_DIR}
-bash ${CERTS_DIR}/gen_certs.sh
+bash ${CERTS_DIR}/gen_cert_chain.sh
 popd
 
 # TODO: add otaclient release package
