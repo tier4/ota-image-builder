@@ -44,4 +44,4 @@ jobs:
             -w /workdir \
             --entrypoint=/bin/bash /entry_point.sh \
             e2e_test_base
-      
+
