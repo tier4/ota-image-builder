@@ -35,6 +35,16 @@ COPY --chmod=755 --from=app_builder /project/dist/ota-image-builder /usr/bin/
 COPY --from=sys_img / /rootfs
 
 ENV SYS_IMG_ROOTFS=/rootfs
-RUN ln -s /usr/bin/ota-image-builder /usr/bin/ota-image-tools
+ENV CERT_DIR=/certs
+RUN set -eux; \
+    ln -s /usr/bin/ota-image-builder /usr/bin/ota-image-tools; \
+    apt-get update; \
+    apt-get install -y -qq --no-install-recommends \
+        openssl; \
+    apt-get clean; \
+    rm -rf; \
+        /tmp/* \
+        /var/lib/apt/lists/* \
+        /var/tmp/*
 
 ENTRYPOINT [ "/usr/bin/ota-image-builder" ]
