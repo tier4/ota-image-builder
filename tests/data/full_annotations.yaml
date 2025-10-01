@@ -7,11 +7,14 @@ vnd.tier4.pilot-auto.project.version: "1.0.0"
 vnd.tier4.pilot-auto.project.release-commit: "abcdef1234567890"
 vnd.tier4.pilot-auto.project.release-branch: "main"
 
+vnd.tier4.ota.release-key: "dev"
 vnd.tier4.web-auto.project: "some-project"
 vnd.tier4.web-auto.project.id: "some-project-id"
 vnd.tier4.web-auto.catalog: "some-catalog"
 vnd.tier4.web-auto.catalog.id: "some-catalog-id"
 vnd.tier4.web-auto.env: "dev"
+vnd.tier4.web-auto.cicd.release-id: "693ac51b-5c23-4d07-b0de-6fcf896b15b9"
+vnd.tier4.web-auto.cicd.release-name: "20250926123456-beta/ota"
 
 # for image-manifest
 vnd.tier4.pilot-auto.platform.ecu.hardware-model: "example-hardware-model"
