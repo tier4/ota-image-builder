@@ -20,21 +20,18 @@ on:
   workflow_dispatch:
 
 jobs:
-  pytest_with_coverage:
+  ota_image_build_e2e_test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout commit
         uses: actions/checkout@v5
-        # sonarcloud needs full git histories
-        with:
-          fetch-depth: 0
       - name: Build test base container image
         run: |
           docker build -f docker/e2e_test_base/Dockerfile -t ota_image_builder_test .
       - name: E2E test
         run: |
-          docker run -it --rm \
+          docker run --rm \
             -v `pwd`/docker/e2e_test_base/e2e_test.sh:/entry_point.sh:ro \
             -v `pwd`/tests/certs/gen_cert_chain.sh:/certs/gen_cert_chain.sh:ro \
             -v `pwd`/tests/data:/workdir:ro \
