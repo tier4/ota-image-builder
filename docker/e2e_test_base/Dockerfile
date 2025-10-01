@@ -38,7 +38,6 @@ COPY --chmod=755 --from=app_builder /project/dist/ota-image-builder /usr/bin/
 COPY --from=sys_img / /rootfs
 
 ENV SYS_IMG_ROOTFS=/rootfs
-ENV CERT_DIR=/certs
 RUN set -eux; \
     ln -s /usr/bin/ota-image-builder /usr/bin/ota-image-tools; \
     apt-get update; \
