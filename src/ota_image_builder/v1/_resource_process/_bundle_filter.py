@@ -23,9 +23,10 @@ from collections.abc import Generator
 from hashlib import new
 from pathlib import Path
 
-from ota_image_libs._resource_filter import BundleFilter
+import zstandard
+from ota_image_libs._resource_filter import BundleFilter, CompressFilter
 from ota_image_libs.common import tmp_fname
-from ota_image_libs.v1.consts import SUPPORTED_HASH_ALG
+from ota_image_libs.v1.consts import SUPPORTED_HASH_ALG, ZSTD_COMPRESSION_ALG
 from ota_image_libs.v1.resource_table.db import ResourceTableDBHelper
 from ota_image_libs.v1.resource_table.schema import (
     ResourceTableManifest,
@@ -136,14 +137,47 @@ class BundleFilterProcesser:
                 ),
             )
 
-            # ------ prepare bundle resource add bundle meta into db ------ #
+            # ------ post generating bundle ------ #
             bundle_digest = bundle_hasher.digest()
-            os.replace(_tmp_bundle, self._resource_dir / bundle_digest.hex())
+            bundle_size = offset
+            logger.info("finish creating bundle, start to apply compression to the bundle ...")
+
+            # ------ directly zstd compress the bundle  ------ #
+            _tmp_compressed_bundle = self._resource_dir / tmp_fname()
+            compressed_bundle_hasher = new(SUPPORTED_HASH_ALG)
+            compressed_bundle_size = 0
+
+            cctx = zstandard.ZstdCompressor(level=cfg.BUNDLE_ZSTD_COMPRESSION_LEVEL)
+            with open(_tmp_bundle, "rb") as _src, open(_tmp_compressed_bundle, "wb") as _dst:
+                for _compressed_chunk in cctx.read_to_iter(
+                    _src, size=bundle_size, read_size=cfg.READ_SIZE
+                ):
+                    compressed_bundle_size += len(_compressed_chunk)
+                    compressed_bundle_hasher.update(_compressed_chunk)
+                    _dst.write(_compressed_chunk)
+            compressed_bundle_digest = compressed_bundle_hasher.digest()
+            _tmp_bundle.unlink()
+            os.replace(_tmp_compressed_bundle, self._resource_dir / compressed_bundle_digest.hex())
+
+            # ------ commit resource to database ------ #
+            compressed_bundle_rs_id = bundle_rs_id + 1
             rs_orm.orm_insert_entry(
                 ResourceTableManifest(
                     resource_id=bundle_rs_id,
                     digest=bundle_digest,
-                    size=offset,
+                    size=bundle_size,
+                    filter_applied=CompressFilter(
+                        resource_id=compressed_bundle_rs_id,
+                        compression_alg=ZSTD_COMPRESSION_ALG,
+                    ),
                 )
             )
-            logger.info(f"bundle_filter: total {bundled_count} files({human_readable_size(offset)}) are bundled.")
+            rs_orm.orm_insert_entry(
+                ResourceTableManifest(
+                    resource_id=compressed_bundle_rs_id,
+                    digest=compressed_bundle_digest,
+                    size=compressed_bundle_size,
+                )
+            )
+            logger.info(f"bundle_filter: total {bundled_count} files({human_readable_size(bundle_size)}) are bundled, {bundle_rs_id=}.")
+            logger.info(f"bundle is compressed to {human_readable_size(compressed_bundle_size)} with zstd, {compressed_bundle_rs_id=}.")
