@@ -27,7 +27,7 @@ jobs:
       - name: checkout repository
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
 
       # see https://docs.astral.sh/uv/guides/integration/github/#setting-up-python for more details.
       - name: Install uv
@@ -58,6 +58,6 @@ jobs:
           else
             echo "uv.lock is updated, commit change ..."
             git add uv.lock requirements.txt
-            git commit -m "[GHA] export new requirements.txt for "
+            git commit -m "[GHA] update uv.lock and requirements.txt"
             git push
           fi
