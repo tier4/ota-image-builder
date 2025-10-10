@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from zipfile import ZIP_STORED, ZipFile, ZipInfo
 
-from ota_image_libs.v1.consts import IMAGE_INDEX_FNAME
+from ota_image_libs.v1.consts import IMAGE_INDEX_FNAME, INDEX_JWT_FNAME
+from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 
 from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
 
@@ -86,8 +87,16 @@ def _pack_artifact(_image_root: Path, _output: Path):
                 )
                 _file_count += 1
 
+                # following the index.json, add the index.jwt file as the second file entry
+                _add_file(
+                    zipf=output_f,
+                    filename=curdir / INDEX_JWT_FNAME,
+                    arcname=INDEX_JWT_FNAME,
+                )
+                _file_count += 1
+
                 for _fname in sorted(files):
-                    if _fname == IMAGE_INDEX_FNAME:
+                    if _fname in (IMAGE_INDEX_FNAME, INDEX_JWT_FNAME):
                         continue
                     _add_file(zipf=output_f, filename=curdir / _fname, arcname=_fname)
                     _file_count += 1
@@ -141,6 +150,11 @@ def pack_artifact_cmd(args: Namespace) -> None:
 
     if not image_root.is_dir():
         exit_with_err_msg(f"{image_root} is not a directory!")
+    _index_helper = ImageIndexHelper(image_root)
+    if not _index_helper.image_index.image_signed:
+        exit_with_err_msg(
+            "image is not yet signed, please sign it before pack_artifact, abort!"
+        )
 
     if not check_if_valid_ota_image(image_root):
         exit_with_err_msg(f"{image_root} doesn't hold a valid OTA image.")
