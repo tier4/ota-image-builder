@@ -55,7 +55,7 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           if git diff --exit-code uv.lock requirements.txt; then
-            echo "skip commit as there is not change"
+            echo "skip commit as there is no change"
           else
             echo "uv.lock and/or requirements.txt are updated, commit change ..."
             git add uv.lock requirements.txt
