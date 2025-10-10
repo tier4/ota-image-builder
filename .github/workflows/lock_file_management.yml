@@ -53,10 +53,10 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          if git diff --exit-code uv.lock; then
-            echo "skip commit as lock file is not changed"
+          if git diff --exit-code uv.lock requirements.txt; then
+            echo "skip commit as there is not change"
           else
-            echo "uv.lock is updated, commit change ..."
+            echo "uv.lock and/or requirements.txt are updated, commit change ..."
             git add uv.lock requirements.txt
             git commit -m "[GHA] update uv.lock and requirements.txt"
             git push
