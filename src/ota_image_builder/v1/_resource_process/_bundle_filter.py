@@ -199,14 +199,14 @@ class BundleFilterProcesser:
         bundle_lower_bound: int = cfg.BUNDLE_LOWER_THRESHOULD,
         bundle_upper_bound: int = cfg.BUNDLE_UPPER_THRESHOULD,
         bundle_blob_size: int = cfg.BUNDLE_SIZE,
-        bundle_compresed_max_sum: int = cfg.BUNDLES_COMPRESSED_MAXIMUM_SUM,
+        bundle_compressed_max_sum: int = cfg.BUNDLES_COMPRESSED_MAXIMUM_SUM,
     ) -> None:
         self._resource_dir = resource_dir
         self._db_helper = ResourceTableDBHelper(rst_dbf)
         self._lower_bound = bundle_lower_bound
         self._upper_bound = bundle_upper_bound
         self._bundle_blob_size = bundle_blob_size
-        self._bundle_compressed_max_sum = bundle_compresed_max_sum
+        self._bundle_compressed_max_sum = bundle_compressed_max_sum
 
     def process(self):
         with contextlib.closing(self._db_helper.connect_rstable_db()) as conn:
@@ -267,7 +267,7 @@ class BundleFilterProcesser:
                     f"#{bundle_blobs_count} bundle generated:\n"
                     f"{len(_bundle_res.bundled_entries)} file entries are bundled.\n"
                     f"bundle size: {human_readable_size(_bundle_res.bundle_size)}.\n"
-                    f"bundle compresed size: {human_readable_size(_compress_res.compressed_size)}"
+                    f"bundle compressed size: {human_readable_size(_compress_res.compressed_size)}"
                 )
                 bundle_results.append((_bundle_res, _compress_res))
 
