@@ -1,0 +1,63 @@
+name: on deps configuration changed, update lock file and export requirements.txt
+# NOTE: requirements.txt serves as a single-way export from uv.lock for snyk
+
+permissions:
+  contents: read
+  packages: read
+  actions: read
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'pyproject.toml'
+      - 'uv.lock'
+  # allow manual dispatch of this workflow
+  workflow_dispatch:
+
+jobs:
+  uv-lock-management:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 1
+
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      # see https://docs.astral.sh/uv/guides/integration/github/#setting-up-python for more details.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.1"
+
+      - name: "Set up Python"
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: update lock files with latest pyproject.toml
+        run: |
+          uv lock
+
+      - name: export requirements.txt
+        run: |
+          uv export --frozen --no-dev --no-editable --no-hashes --no-emit-project > requirements.txt
+
+      - name: commit change if needed
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --exit-code uv.lock; then
+            echo "skip commit as lock file is not changed"
+          else
+            echo "uv.lock is updated, commit change ..."
+            git add uv.lock requirements.txt
+            git commit -m "[GHA] export new requirements.txt for "
+            git push
+          fi
