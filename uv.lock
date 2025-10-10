@@ -333,9 +333,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cryptography", specifier = "~=45.0" },
+    { name = "cryptography", specifier = ">=45.0.1,<47" },
     { name = "msgpack", specifier = "~=1.1" },
-    { name = "ota-image-libs", url = "https://github.com/tier4/ota-image-libs/releases/download/v0.2.1/ota_image_libs-0.2.1-py3-none-any.whl" },
+    { name = "ota-image-libs", url = "https://github.com/tier4/ota-image-libs/releases/download/v0.2.3/ota_image_libs-0.2.3-py3-none-any.whl" },
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "pyjwt", specifier = "~=2.9" },
     { name = "pyyaml", specifier = "==6.0.3" },
@@ -356,8 +356,8 @@ dev = [
 
 [[package]]
 name = "ota-image-libs"
-version = "0.2.1"
-source = { url = "https://github.com/tier4/ota-image-libs/releases/download/v0.2.1/ota_image_libs-0.2.1-py3-none-any.whl" }
+version = "0.2.3"
+source = { url = "https://github.com/tier4/ota-image-libs/releases/download/v0.2.3/ota_image_libs-0.2.3-py3-none-any.whl" }
 dependencies = [
     { name = "cryptography" },
     { name = "msgpack" },
@@ -369,12 +369,12 @@ dependencies = [
     { name = "zstandard" },
 ]
 wheels = [
-    { url = "https://github.com/tier4/ota-image-libs/releases/download/v0.2.1/ota_image_libs-0.2.1-py3-none-any.whl", hash = "sha256:7230adf646059cfcdb942b9f7c8974fa0f930969b72856b05ae2b69817558269" },
+    { url = "https://github.com/tier4/ota-image-libs/releases/download/v0.2.3/ota_image_libs-0.2.3-py3-none-any.whl", hash = "sha256:91b16225de5dedcd3c1bdee87c58b38950e45aa6596858e8f4b788fff93207c0" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "cryptography", specifier = ">=45.0,<46" },
+    { name = "cryptography", specifier = ">=45.0,<47" },
     { name = "msgpack", specifier = ">=1.1,<2" },
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "pyjwt", specifier = ">=2.9.0,<3" },
