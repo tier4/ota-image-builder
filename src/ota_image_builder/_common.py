@@ -36,11 +36,10 @@ RT = TypeVar("RT")
 KT = TypeVar("KT")
 VT = TypeVar("VT")
 
-_MultiUnits = Literal["GiB", "MiB", "KiB", "Bytes", "KB", "MB", "GB"]
+_MultiUnits = Literal["GiB", "MiB", "KiB", "Bytes"]
 # fmt: off
 _multiplier: dict[_MultiUnits, int] = {
     "GiB": 1024 ** 3, "MiB": 1024 ** 2, "KiB": 1024 ** 1,
-    "GB": 1000 ** 3, "MB": 1000 ** 2, "KB": 1000 ** 1,
     "Bytes": 1,
 }
 # fmt: on
@@ -81,7 +80,7 @@ def func_call_with_se(
 def configure_logging():
     logging.basicConfig(
         level=logging.INFO,
-        format="[%(levelname)s]-%(funcName)s:%(lineno)d,%(message)s",
+        format="[%(levelname)-8s] %(asctime)s %(funcName)s:%(lineno)d,%(message)s",
     )
     _root_logger = logging.getLogger()
     # mute loggings from third-party packages

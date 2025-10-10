@@ -15,9 +15,13 @@ popd
 # TODO: add otaclient release package
 
 mkdir -p ${OTA_IMAGE_DIR}
+
+echo -e "\n------------ init empty OTA image ------------"
 ota-image-builder -d init \
     --annotations-file full_annotations.yaml \
     ${OTA_IMAGE_DIR}
+
+echo -e "\n------------ add image payload(dev) into OTA image ------------"
 ota-image-builder -d add-image \
     --annotations-file full_annotations.yaml \
     --release-key dev \
@@ -25,6 +29,8 @@ ota-image-builder -d add-image \
     --sys-config "sub:sys_config.yaml" \
     --rootfs ${SYS_IMG_ROOTFS} \
     ${OTA_IMAGE_DIR}
+
+echo -e "\n------------ add image payload(prd) into OTA image ------------"
 ota-image-builder -d add-image \
     --annotations-file full_annotations.yaml \
     --release-key prd \
@@ -32,7 +38,11 @@ ota-image-builder -d add-image \
     --sys-config "sub:sys_config.yaml" \
     --rootfs ${SYS_IMG_ROOTFS}/var \
     ${OTA_IMAGE_DIR}
+
+echo -e "\n------------ finalize OTA image ------------"
 ota-image-builder -d finalize ${OTA_IMAGE_DIR}
+
+echo -e "\n------------ sign OTA image ------------"
 ota-image-builder -d sign \
     --sign-cert ${CERT_DIR}/sign.pem \
     --sign-key ${CERT_DIR}/sign.key \
@@ -40,4 +50,5 @@ ota-image-builder -d sign \
     ${OTA_IMAGE_DIR}
 rm -rf ${CERT_DIR}/*.key
 
+echo -e "\n------------ OTA image build finished! ------------"
 ota-image-tools inspect-index ${OTA_IMAGE_DIR}
