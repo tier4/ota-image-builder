@@ -1,4 +1,4 @@
-name: on deps configuration changed, update lock file and export requirements.txt
+name: Dependency Management CI
 # NOTE: requirements.txt serves as a single-way export from uv.lock for snyk
 
 permissions:
@@ -12,6 +12,7 @@ on:
       - main
     paths:
       - 'pyproject.toml'
+      - 'requirements.txt'
       - 'uv.lock'
   # allow manual dispatch of this workflow
   workflow_dispatch:
