@@ -55,6 +55,10 @@ DEFAULT_EXTRA_IGNORE_PATTERNS = [
     "/var/log/syslog.*",
 ]
 
+BACKWARD_COMPAT_PA = [
+    re.compile(r"^/?home/autoware/[\w\*]+/build"),
+    re.compile(r"^/?boot/ota[/\w\.]*")
+]
 
 GLOB_SPECIAL_CHARS = re.compile(r"[\*\?\[\]\|]")
 
