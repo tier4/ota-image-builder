@@ -62,6 +62,22 @@ BACKWARD_COMPAT_PA = [
 
 GLOB_SPECIAL_CHARS = re.compile(r"[\*\?\[\]\|]")
 
+def _load_extra_patterns_from_file(_f: str) -> list[str]:
+    _pattern_f = Path(_f)
+    if not _pattern_f.is_file():
+        exit_with_err_msg(
+            f"Extra pattern file is specified, but {_pattern_f} is not a file!"
+        )
+
+    _res = []
+    for _line in _pattern_f.read_text().splitlines():
+        for _pa in BACKWARD_COMPAT_PA:
+            if _pa.match(_line):
+                break
+        else:
+            _res.append(_line)
+    return _res
+
 
 class RootfsImagePreparer:
     def __init__(
@@ -157,12 +173,7 @@ def prepare_sysimg_cmd(args: Namespace) -> None:
 
     _extra_patterns = None
     if _pattern_f := args.cleanup_pattern_file:
-        _pattern_f = Path(_pattern_f)
-        if not _pattern_f.is_file():
-            exit_with_err_msg(
-                f"Extra pattern file is specified, but {_pattern_f} is not a file!"
-            )
-        _extra_patterns = _pattern_f.read_text().splitlines()
+        _extra_patterns = _load_extra_patterns_from_file(_pattern_f)
 
     _preparer = RootfsImagePreparer(
         rootfs_dir,
