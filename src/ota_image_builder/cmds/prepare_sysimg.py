@@ -57,10 +57,11 @@ DEFAULT_EXTRA_IGNORE_PATTERNS = [
 
 BACKWARD_COMPAT_PA = [
     re.compile(r"^/?home/autoware/[\w\*]+/build"),
-    re.compile(r"^/?boot/ota[/\w\.]*")
+    re.compile(r"^/?boot/ota[/\w\.]*"),
 ]
 
 GLOB_SPECIAL_CHARS = re.compile(r"[\*\?\[\]\|]")
+
 
 def _load_extra_patterns_from_file(_f: str) -> list[str]:
     _pattern_f = Path(_f)
