@@ -4,7 +4,7 @@ annotated-types==0.7.0
     # via pydantic
 cffi==2.0.0 ; platform_python_implementation != 'PyPy'
     # via cryptography
-cryptography==46.0.2
+cryptography==46.0.3
     # via
     #   ota-image-builder
     #   ota-image-libs
