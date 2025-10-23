@@ -360,7 +360,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "pyjwt", specifier = "~=2.9" },
     { name = "pyyaml", specifier = "==6.0.3" },
-    { name = "simple-sqlite3-orm", specifier = "~=0.12" },
+    { name = "simple-sqlite3-orm", specifier = "~=0.13" },
     { name = "typing-extensions", specifier = ">=4.6.3" },
     { name = "zstandard", specifier = ">=0.22,<0.26" },
 ]
@@ -727,15 +727,15 @@ wheels = [
 
 [[package]]
 name = "simple-sqlite3-orm"
-version = "0.12.1"
+version = "0.13.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/53/03/24c4022c56e0348fc1e77aeb59f56d9af204ce26ecd5caec6991781d3039/simple_sqlite3_orm-0.12.1.tar.gz", hash = "sha256:44ba712a88e814c8530f4282ca37966fa3e1beda96289e8f05f67a7d1d50d805", size = 94686, upload-time = "2025-08-13T11:43:10.883Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/2e/f515bb48e8dd142e411bbb8196c0addf7fd9c68b8819273bf77d85c1d47f/simple_sqlite3_orm-0.13.0.tar.gz", hash = "sha256:24f5fad5b3a768238f56f87ac41c069e85fcbd631ce21eaff97b8e34e0132e9c", size = 97081, upload-time = "2025-10-19T08:24:21.528Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/52/0361f60429dfaec545d497a8bc8abf3e9f7b10a30ae551b6a64a872c93c2/simple_sqlite3_orm-0.12.1-py3-none-any.whl", hash = "sha256:12e276dfd5fd21b1d3e4f6141fef7486bda85bbd9befccec0696d5cd636f009a", size = 38579, upload-time = "2025-08-13T11:43:09.737Z" },
+    { url = "https://files.pythonhosted.org/packages/60/d1/329fa8f6e699182b1093b450a8f4871f567dcae69a15b24ff740daa6f8d0/simple_sqlite3_orm-0.13.0-py3-none-any.whl", hash = "sha256:b64b8c894ae43d5818f70ce173bb945c375e0214c53bdb9bc555c4ae68e1af0f", size = 38664, upload-time = "2025-10-19T08:24:20.126Z" },
 ]
 
 [[package]]
