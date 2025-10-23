@@ -31,7 +31,7 @@ pyyaml==6.0.3
     # via
     #   ota-image-builder
     #   ota-image-libs
-simple-sqlite3-orm==0.12.1
+simple-sqlite3-orm==0.13.0
     # via
     #   ota-image-builder
     #   ota-image-libs
