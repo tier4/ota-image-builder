@@ -16,12 +16,12 @@ ota-image-libs @ https://github.com/tier4/ota-image-libs/releases/download/v0.2.
     # via ota-image-builder
 pycparser==2.23 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
     # via cffi
-pydantic==2.12.0
+pydantic==2.12.3
     # via
     #   ota-image-builder
     #   ota-image-libs
     #   simple-sqlite3-orm
-pydantic-core==2.41.1
+pydantic-core==2.41.4
     # via pydantic
 pyjwt==2.10.1
     # via
