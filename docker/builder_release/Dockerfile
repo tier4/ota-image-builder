@@ -2,8 +2,6 @@
 ARG UBUNTU_BASE=ubuntu:24.04
 ARG BUILD_BASE=python:3.13-bookworm
 
-ARG UV_VERSION=0.9.4
-
 FROM ${BUILD_BASE} AS app_build
 
 ARG PYINSTALLER_VER=6.16.0
@@ -13,7 +11,7 @@ RUN mkdir /build
 COPY ./src /build/src
 COPY ./pyproject.toml ./uv.lock ./README.md /build/
 
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.9.4 /uv /uvx /bin/
 
 WORKDIR /build
 # NOTE: mount .git for hatch-vcs to determine the version
