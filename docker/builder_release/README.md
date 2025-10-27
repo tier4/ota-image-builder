@@ -1,16 +1,14 @@
-# OTA image builder release by docker image
-
-Distribute OTA image builder by docker image.
+# OTA image builder release as distroless docker image
 
 ## Images
 
-The distro is built with Ubuntu 24.04.
+The distro is built with python3.13-bookworm, as evaluator builder now is based on ubuntu 24.04.
 
-The images are available as follow:
+The distroless images are available as follow:
 1. `ghcr.io/tier4/ota-image-builder/ota-image-builder:{major}.{minor}.{patch}`,
-like `ghcr.io/tier4/ota-image-builder/ota-image-builder:v0.7.0` or `ghcr.io/tier4/ota-image-builder/ota-image-builder:0.7.0`
+like `ghcr.io/tier4/ota-image-builder/ota-image-builder:0.7.0`.
 
-Both x86_64 and arm64 platform are supported.
+Both x86_64 and arm64 targets are supported.
 
 ## Installing ota-image-builder from the image
 
