@@ -178,5 +178,7 @@ jobs:
         env:
           VERSION: ${{ steps.merge_image.outputs.release_ver }}
         run: |
-          podman manifest push --all ${BASE_URL}:${VERSION}
+          podman manifest push \
+            --all --compression-format zstd --compression-level 6 \
+            ${BASE_URL}:${VERSION}
           
