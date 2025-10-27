@@ -185,4 +185,3 @@ jobs:
           podman manifest push \
             --all --compression-format zstd --compression-level 6 \
             ${BASE_URL}:${VERSION#v}
-          
