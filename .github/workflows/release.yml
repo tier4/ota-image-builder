@@ -141,8 +141,8 @@ jobs:
       - name: Load docker images and merge manifests
         id: merge_image
         run: |
-          [ `cat x86_64/version.txt` != `cat arm64/version.txt` ] && exit 1
-          VERSION=`cat x86_64/version.txt`
+          [ `cat x86_64_dist/version.txt` != `cat arm64_dist/version.txt` ] && exit 1
+          VERSION=`cat x86_64_dist/version.txt`
           RAW_VER="${VERSION#v}"
           echo "release_ver=${VERSION}" >> "$GITHUB_OUTPUT"
 
