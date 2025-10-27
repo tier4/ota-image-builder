@@ -107,7 +107,7 @@ jobs:
           github.event.action == 'published' &&
           github.event.release.target_commitish == 'main'
         env:
-          BASE_URL: ghcr.io/tier4/ota-image-builder
+          BASE_URL: ghcr.io/tier4/ota-image-builder/ota-image-builder
           RELEASE_VER: ${{ steps.version_check.outputs.release_ver }}
         run: |
           RAW_VER="${RELEASE_VER#v}"

@@ -7,7 +7,8 @@ Distribute OTA image builder by docker image.
 The distro is built with Ubuntu 24.04.
 
 The images are available as follow:
-1. `ghcr.io/tier4/ota-image-builder:{major}.{minor}.{patch}`, like `ghcr.io/tier4/ota-image-builder:v0.7.0` or `ghcr.io/tier4/ota-image-builder:0.7.0`
+1. `ghcr.io/tier4/ota-image-builder/ota-image-builder:{major}.{minor}.{patch}`,
+like `ghcr.io/tier4/ota-image-builder/ota-image-builder:v0.7.0` or `ghcr.io/tier4/ota-image-builder/ota-image-builder:0.7.0`
 
 Both x86_64 and arm64 platform are supported.
 
