@@ -5,6 +5,7 @@
 The distro is built with python3.13-bookworm, as evaluator builder now is based on ubuntu 24.04.
 
 The distroless images are available as follow:
+
 1. `ghcr.io/tier4/ota-image-builder/ota-image-builder:{major}.{minor}.{patch}`,
 like `ghcr.io/tier4/ota-image-builder/ota-image-builder:0.7.0`.
 

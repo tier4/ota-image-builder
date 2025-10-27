@@ -80,11 +80,7 @@ def main():
         name="version",
         help="Print the version string of this OTA Image Builder.",
     )
-    version_cmd.set_defaults(
-        handler=lambda _: print(
-            f"v{version}"
-        )
-    )
+    version_cmd.set_defaults(handler=lambda _: print(f"v{version}"))
 
     version_info_cmd = sub_arg_parser.add_parser(
         name="version-info",

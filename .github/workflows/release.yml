@@ -103,7 +103,7 @@ jobs:
         run: |
           docker save ota-image-builder:${{ matrix.platform }} \
             --output ./ota-image-builder.tar
-      
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -156,7 +156,7 @@ jobs:
             containers-storage:ota-image-builder:x86_64 --arch linux/x86_64
           podman manifest add localhost/ota-image-builder:multi-arch \
             containers-storage:ota-image-builder:arm64 --arch linux/arm64
-          
+
           # tag generated image
           podman tag localhost/ota-image-builder:multi-arch \
             ${BASE_URL}:${VERSION} ${BASE_URL}:${RAW_VER}
