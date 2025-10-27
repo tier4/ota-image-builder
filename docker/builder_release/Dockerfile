@@ -21,7 +21,8 @@ RUN --mount=type=bind,source=./.git,target=/build/.git,ro \
     apt-get install -y -qq --no-install-recommends \
         git python3 python3-setuptools; \
     uv run --with=pyinstaller==${PYINSTALLER_VER} --locked --no-managed-python --python=3.13 \
-        pyinstaller -D -s --name ota-image-builder src/ota_image_builder/__main__.py
+        pyinstaller -D -s --name ota-image-builder src/ota_image_builder/__main__.py; \
+    ln -s ota-image-builder /ota-image-builder/ota-image-tools
 
 FROM ${UBUNTU_BASE}
 
