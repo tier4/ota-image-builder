@@ -8,7 +8,7 @@ requires = [
 name = "ota-image-builder"
 description = "OTA Image Builder."
 dynamic = ["optional-dependencies"]
-version = "0.6.0"
+version = "0.7.0"
 # unfortunately, up to 20250909, dependabot has a bug
 #   that prevents it from working when readme is specified.
 # readme = "README.md"
