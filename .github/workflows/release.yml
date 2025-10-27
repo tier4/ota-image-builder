@@ -184,7 +184,7 @@ jobs:
         run: |
           # stop push that has mismatched tag version to prevent
           #   accidentally override already published images.
-          [ "$VERSION" != "$RELEASE_TAG_VER" ] && exit 1
+          [ "$VERSION" != "$RELEASE_TAG_VER" ] && echo "Error: Version mismatch - expected $RELEASE_TAG_VER but got $VERSION" >&2 && exit 1
           podman manifest push \
             --all --compression-format zstd --compression-level 6 \
             ${BASE_URL}:${VERSION#v}
