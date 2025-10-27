@@ -1,5 +1,4 @@
 # NOTE: now evaluator builder is based on ubuntu:24.04
-ARG UBUNTU_BASE=ubuntu:24.04
 ARG BUILD_BASE=python:3.13-bookworm
 
 FROM ${BUILD_BASE} AS app_build
@@ -24,10 +23,8 @@ RUN --mount=type=bind,source=./.git,target=/build/.git,ro \
         pyinstaller -D -s --name ota-image-builder src/ota_image_builder/__main__.py; \
     ln -s ota-image-builder /build/dist/ota-image-builder/ota-image-tools
 
-FROM ${UBUNTU_BASE}
+FROM scratch
 
 ARG BUILDER_INSTALLATION="/ota-image-builder"
 
 COPY --from=app_build /build/dist/ota-image-builder ${BUILDER_INSTALLATION}
-
-ENTRYPOINT [ "/ota-image-builder/ota-image-builder" ]
