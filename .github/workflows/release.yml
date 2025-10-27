@@ -129,6 +129,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install podman
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y podman
+
       - name: Download x86_64 artifact
         uses: actions/download-artifact@v5
         with:
@@ -145,17 +150,25 @@ jobs:
         id: merge_image
         run: |
           [ `cat x86_64/version.txt` != `cat arm64/version.txt` ] && exit 1
-          docker load -i x86_64/ota-image-builder.tar
-          docker load -i arm64_dist/ota-image-builder.tar
           VERSION=`cat x86_64/version.txt`
           RAW_VER="${VERSION#v}"
-          docker buildx imagetools create \
-            -t ${BASE_URL}:${VERSION} \
-            -t ${BASE_URL}:${RAW_VER} \
-            ota-image-builder:x86_64 \
-            ota-image-builder:arm64
-          docker rm ota-image-builder:arm64 ota-image-builder:x86_64
           echo "release_ver=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          # load images
+          podman load -i x86_64/ota-image-builder.tar
+          podman load -i arm64_dist/ota-image-builder.tar
+
+          # generate multi-arch image
+          podman manifest create localhost/ota-image-builder:multi-arch
+          podman manifest add localhost/ota-image-builder:multi-arch \
+            localhost/ota-image-builder:x86_64 --arch linux/x86_64
+          podman manifest add localhost/ota-image-builder:multi-arch \
+            localhost/ota-image-builder:arm64 --arch linux/arm64
+          
+          # tag generated image
+          podman tag localhost/ota-image-builder:multi-arch \
+            ${BASE_URL}:${VERSION} ${BASE_URL}:${RAW_VER}
+          podman rmi localhost/ota-image-builder:multi-arch
 
       - name: Push ota-image-builder docker image
         if: >
@@ -165,5 +178,5 @@ jobs:
         env:
           VERSION: ${{ steps.merge_image.outputs.release_ver }}
         run: |
-          docker push -a ${BASE_URL}:${VERSION}
+          podman manifest push --all ${BASE_URL}:${VERSION}
           
