@@ -122,13 +122,6 @@ jobs:
     env:
       BASE_URL: ghcr.io/tier4/ota-image-builder/ota-image-builder
     steps:
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install podman
         run: |
           sudo apt-get update -qq
@@ -170,11 +163,20 @@ jobs:
             ${BASE_URL}:${VERSION} ${BASE_URL}:${RAW_VER}
           podman rmi localhost/ota-image-builder:multi-arch
 
-      - name: Push ota-image-builder docker image
+      - name: Login to GHCR
+        id: podman_login
         if: >
           github.event_name == 'release' &&
           github.event.action == 'published' &&
           github.event.release.target_commitish == 'main'
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push ota-image-builder docker image
+        if: ${{ steps.podman_login.conclusion != 'skipped' }}
         env:
           VERSION: ${{ steps.merge_image.outputs.release_ver }}
         run: |
