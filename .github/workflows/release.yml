@@ -70,8 +70,7 @@ jobs:
 
   ota-image-builder_image_build:
     permissions:
-      contents: write
-      packages: write
+      contents: read
     strategy:
       matrix:
         platform: [x86_64, arm64]
@@ -91,15 +90,72 @@ jobs:
         run: |
           docker build \
             -f docker/builder_release/Dockerfile \
-            -t ota-image-builder:local_build .
+            -t ota-image-builder:${{ matrix.platform }} .
 
       - name: Test build and check version
         id: version_check
         run: |
           docker run \
-            --rm ota-image-builder:local_build version > version.txt
-          echo "release_ver=`cat version.txt`" >> "$GITHUB_OUTPUT"
+            --rm ota-image-builder:${{ matrix.platform }} version > version.txt
           echo "release version is `cat version.txt`."
+          mv version.txt version_${{ matrix.platform }}.txt
+
+      - name: Export built image
+        run: |
+          docker save ota-image-builder:${{ matrix.platform }} \
+            --output ./ota-image-builder_${{ matrix.platform }}.tar
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-image-builder_${{ matrix.platform }}
+          path: |
+            ./version.txt
+            ./ota-image-builder.tar
+
+  publish_ota-image-builder_images:
+    needs: ["ota-image-builder_image_build"]
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu:latest
+    env:
+      BASE_URL: ghcr.io/tier4/ota-image-builder/ota-image-builder
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download x86_64 artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ota-image-builder_x86_64
+          path: x86_64_dist
+
+      - name: Download arm64 artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ota-image-builder_arm64
+          path: arm64_dist
+
+      - name: Load docker images and merge manifests
+        id: merge_image
+        run: |
+          [ `cat x86_64/version.txt` != `cat arm64/version.txt` ] && exit 1
+          docker load -i x86_64/ota-image-builder.tar
+          docker load -i arm64_dist/ota-image-builder.tar
+          VERSION=`cat x86_64/version.txt`
+          RAW_VER="${VERSION#v}"
+          docker buildx imagetools create \
+            -t ${BASE_URL}:${VERSION} \
+            -t ${BASE_URL}:${RAW_VER} \
+            ota-image-builder:x86_64 \
+            ota-image-builder:arm64
+          docker rm ota-image-builder:arm64 ota-image-builder:x86_64
+          echo "release_ver=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Push ota-image-builder docker image
         if: >
@@ -107,12 +163,7 @@ jobs:
           github.event.action == 'published' &&
           github.event.release.target_commitish == 'main'
         env:
-          BASE_URL: ghcr.io/tier4/ota-image-builder/ota-image-builder
-          RELEASE_VER: ${{ steps.version_check.outputs.release_ver }}
+          VERSION: ${{ steps.merge_image.outputs.release_ver }}
         run: |
-          RAW_VER="${RELEASE_VER#v}"
-          docker tag ota-image-builder:local_build "$BASE_URL:$RELEASE_VER"
-          docker tag ota-image-builder:local_build "$BASE_URL:$RAW_VER"
-          docker push "$BASE_URL:$RELEASE_VER"
-          docker push "$BASE_URL:$RAW_VER"
+          docker push -a ${BASE_URL}:${VERSION}
           
