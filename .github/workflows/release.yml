@@ -153,9 +153,9 @@ jobs:
           # generate multi-arch image
           podman manifest create localhost/ota-image-builder:multi-arch
           podman manifest add localhost/ota-image-builder:multi-arch \
-            containers-storage:ota-image-builder:x86_64 --arch linux/x86_64
+            containers-storage:ota-image-builder:x86_64 --arch amd64
           podman manifest add localhost/ota-image-builder:multi-arch \
-            containers-storage:ota-image-builder:arm64 --arch linux/arm64
+            containers-storage:ota-image-builder:arm64 --arch arm64
 
           # tag generated image
           podman tag localhost/ota-image-builder:multi-arch \
