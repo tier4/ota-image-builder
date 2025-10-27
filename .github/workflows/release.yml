@@ -90,7 +90,7 @@ jobs:
       - name: Build ota-image-builder docker image release
         run: |
           docker build \
-            -f docker/Dockerfile.ota-image-builder \
+            -f docker/builder_release/Dockerfile \
             -t ota-image-builder:local_build .
 
       - name: Test build and check version
