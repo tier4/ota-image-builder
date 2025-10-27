@@ -20,11 +20,12 @@ Your can add `ota-image-builder` to your docker image by updating your dockerfil
 
 ```dockerfile
 ARG YOUR_BASE_IMAGE
+ARG OTA_IMAGE_BUILDER_VER=0.7.0
+
+# will automatically choose the x86_64 or arm64 ota-image-builder variants
+FROM ghcr.io/tier4/ota-image-builder:${OTA_IMAGE_BUILDER_VER} AS ota-image-builder
 
 FROM ${YOUR_BASE_IMAGE}
 
-ARG OTA_IMAGE_BUILDER_VER=v0.6.1
-
-# will automatically choose the x86_64 or arm64 ota-image-builder variants
-COPY --from=ghcr.io/tier4/ota-image-builder:${OTA_IMAGE_BUILDER_VER} /ota-image-builder /opt/ota-image-builder
+COPY --from=ota-image-builder /ota-image-builder /opt/ota-image-builder
 ```
