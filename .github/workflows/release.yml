@@ -98,12 +98,11 @@ jobs:
           docker run \
             --rm ota-image-builder:${{ matrix.platform }} version > version.txt
           echo "release version is `cat version.txt`."
-          mv version.txt version_${{ matrix.platform }}.txt
 
       - name: Export built image
         run: |
           docker save ota-image-builder:${{ matrix.platform }} \
-            --output ./ota-image-builder_${{ matrix.platform }}.tar
+            --output ./ota-image-builder.tar
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -148,7 +147,7 @@ jobs:
           echo "release_ver=${VERSION}" >> "$GITHUB_OUTPUT"
 
           # load images
-          podman load -i x86_64/ota-image-builder.tar
+          podman load -i x86_64_dist/ota-image-builder.tar
           podman load -i arm64_dist/ota-image-builder.tar
 
           # generate multi-arch image
@@ -162,6 +161,9 @@ jobs:
           podman tag localhost/ota-image-builder:multi-arch \
             ${BASE_URL}:${VERSION} ${BASE_URL}:${RAW_VER}
           podman rmi localhost/ota-image-builder:multi-arch
+
+          # inspect manifest
+          podman manifest inspect ${BASE_URL}:${VERSION}
 
       - name: Login to GHCR
         id: podman_login
