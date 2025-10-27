@@ -6,11 +6,10 @@ on:
   # allow manually triggering the build
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   ota-image-builder_build:
+    permissions:
+      contents: write
     strategy:
       matrix:
         platform: [x86_64, arm64]
@@ -68,3 +67,52 @@ jobs:
         with:
           files: |
             ./dist/*
+
+  ota-image-builder_image_build:
+    permissions:
+      contents: write
+      packages: write
+    strategy:
+      matrix:
+        platform: [x86_64, arm64]
+        # NOTE: we do native build for both platforms
+        include:
+          - platform: x86_64
+            os: ubuntu-22.04
+          - platform: arm64
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build ota-image-builder docker image release
+        run: |
+          docker build \
+            -f docker/Dockerfile.ota-image-builder \
+            -t ota-image-builder:local_build .
+
+      - name: Test build and check version
+        id: version_check
+        run: |
+          docker run \
+            --rm ota-image-builder:local_build version > version.txt
+          echo "release_ver=`cat version.txt`" >> "$GITHUB_OUTPUT"
+          echo "release version is `cat version.txt`."
+
+      - name: Push ota-image-builder docker image
+        if: >
+          github.event_name == 'release' &&
+          github.event.action == 'published' &&
+          github.event.release.target_commitish == 'main'
+        env:
+          BASE_URL: ghcr.io/tier4/ota-image-builder
+          RELEASE_VER: ${{ steps.version_check.outputs.release_ver }}
+        run: |
+          RAW_VER="${RELEASE_VER#v}"
+          docker tag ota-image-builder:local_build "$BASE_URL:$RELEASE_VER"
+          docker tag ota-image-builder:local_build "$BASE_URL:$RAW_VER"
+          docker push "$BASE_URL:$RELEASE_VER"
+          docker push "$BASE_URL:$RAW_VER"
+          
