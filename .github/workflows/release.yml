@@ -180,7 +180,11 @@ jobs:
         if: ${{ steps.podman_login.conclusion != 'skipped' }}
         env:
           VERSION: ${{ steps.merge_image.outputs.release_ver }}
+          RELEASE_TAG_VER: ${{ github.event.release.tag_name }}
         run: |
+          # stop push that has mismatched tag version to prevent
+          #   accidentally override already published images.
+          [ "$VERSION" != "$RELEASE_TAG_VER" ] && exit 1
           podman manifest push \
             --all --compression-format zstd --compression-level 6 \
             ${BASE_URL}:${VERSION#v}
