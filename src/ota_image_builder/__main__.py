@@ -16,7 +16,7 @@ import os
 import sys
 from multiprocessing import freeze_support
 
-OTA_IMAGE_TOOLS = "ota_image_tools"
+OTA_IMAGE_TOOLS = ["ota_image_tools", "ota-image-tools"]
 
 # NOTE: freeze_support should be executed as early as possible.
 if __name__ == "__main__":
@@ -29,12 +29,13 @@ if __name__ == "__main__":
 
     # special treatment when the program is called with name ota_image_tools.
     _cli_name = os.path.basename(sys.argv[0])
-    if _cli_name.replace("-", "_").startswith(OTA_IMAGE_TOOLS):
-        from ota_image_tools.__main__ import main as _image_tool_main
+    for _hint in OTA_IMAGE_TOOLS:
+        if _cli_name.replace("-", "_").startswith(_hint):
+            from ota_image_tools.__main__ import main as _image_tool_main
 
-        _image_tool_main()
+            _image_tool_main()
+            sys.exit(0)
 
-    else:
-        from ota_image_builder.main import main as _builder_main
+    from ota_image_builder.main import main as _builder_main
 
-        _builder_main()
+    _builder_main()

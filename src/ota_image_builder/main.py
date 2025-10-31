@@ -78,9 +78,15 @@ def main():
 
     version_cmd = sub_arg_parser.add_parser(
         name="version",
-        help="Print the version of this OTA Image Builder.",
+        help="Print the version string of this OTA Image Builder.",
     )
-    version_cmd.set_defaults(
+    version_cmd.set_defaults(handler=lambda _: print(f"v{version}"))
+
+    version_info_cmd = sub_arg_parser.add_parser(
+        name="version-info",
+        help="Print the full version info of this OTA Image Builder.",
+    )
+    version_info_cmd.set_defaults(
         handler=lambda _: print(
             f"ota-image-builder v{version} (Built with ota-image-lib v{ota_image_libs_version})"
         )
