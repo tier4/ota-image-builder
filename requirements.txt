@@ -12,7 +12,7 @@ msgpack==1.1.2
     # via
     #   ota-image-builder
     #   ota-image-libs
-ota-image-libs @ https://github.com/tier4/ota-image-libs/releases/download/v0.2.3/ota_image_libs-0.2.3-py3-none-any.whl
+ota-image-libs @ https://github.com/tier4/ota-image-libs/releases/download/v0.2.6/ota_image_libs-0.2.6-py3-none-any.whl
     # via ota-image-builder
 pycparser==2.23 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
     # via cffi

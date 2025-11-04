@@ -24,7 +24,11 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 from ota_image_libs.common import tmp_fname
-from ota_image_libs.v1.annotation_keys import OTA_RELEASE_KEY, PLATFORM_ECU
+from ota_image_libs.v1.annotation_keys import (
+    NVIDIA_JETSON_BSP_VER,
+    OTA_RELEASE_KEY,
+    PLATFORM_ECU,
+)
 from ota_image_libs.v1.file_table.schema import ZstdCompressedFileTableDescriptor
 from ota_image_libs.v1.image_config.schema import ImageConfig
 from ota_image_libs.v1.image_config.sys_config import SysConfig
@@ -32,7 +36,12 @@ from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 from ota_image_libs.v1.image_manifest.schema import ImageManifest, OTAReleaseKey
 from ota_image_libs.v1.resource_table.schema import ResourceTableDescriptor
 
-from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
+from ota_image_builder._common import (
+    NV_TEGRA_RELEASE_FPATH,
+    check_if_valid_ota_image,
+    exit_with_err_msg,
+    get_bsp_ver_info,
+)
 from ota_image_builder._configs import cfg
 from ota_image_builder.v1._image_config import (
     AddImageConfigAnnotations,
@@ -241,6 +250,18 @@ def _process_rootfs_image(
     return image_stat, _ft_db_descriptor
 
 
+def _detect_nvidia_jetson_bsp_ver(_rootfs_dir: Path) -> str | None:
+    """Try to detect rootfs BSP version.
+
+    If it is a rootfs image for NVIDIA Jetson ECU, return the detected BSP ver string.
+    """
+    nv_tegra_release_fpath = _rootfs_dir / Path(NV_TEGRA_RELEASE_FPATH).relative_to("/")
+    if not nv_tegra_release_fpath.is_file():
+        return
+
+    return get_bsp_ver_info(nv_tegra_release_fpath.read_text())
+
+
 def add_image_cmd(args: Namespace) -> None:
     logger.debug(f"calling {add_image_cmd.__name__} with {args}")
     image_root = Path(args.image_root)
@@ -271,6 +292,16 @@ def add_image_cmd(args: Namespace) -> None:
                 "should be one of 'dev' or 'prd'."
             )
         logger.info(f"Using release key from annotations: {ota_release_key}.")
+
+    # try to determine the rootfs' BSP version if it is a NVIDIA Jetson ECU's rootfs image
+    if rootfs_bsp_ver := _detect_nvidia_jetson_bsp_ver(rootfs_path):
+        logger.info(
+            f"Rootfs image is an rootfs image of NVIDIA Jetson ECU, rootfs BSP ver: {rootfs_bsp_ver}"
+        )
+        logger.info(
+            f"Add {NVIDIA_JETSON_BSP_VER} annotation to the image_manifest and image_config"
+        )
+        annotations[NVIDIA_JETSON_BSP_VER] = rootfs_bsp_ver
 
     sys_config_files = _parse_specs(args.sys_config)
 
