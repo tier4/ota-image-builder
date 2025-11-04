@@ -34,6 +34,7 @@ from ota_image_libs.v1.resource_table.schema import ResourceTableDescriptor
 
 from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
 from ota_image_builder._configs import cfg
+from ota_image_builder.cmds._utils import validate_annotations
 from ota_image_builder.v1._image_config import (
     AddImageConfigAnnotations,
     compose_image_config,
@@ -110,31 +111,6 @@ def add_image_cmd_args(
         help="The folder of the OTA image we will add new system rootfs image to.",
     )
     add_image_arg_parser.set_defaults(handler=add_image_cmd)
-
-
-def _validate_annotations(annotations_file: Path) -> dict[str, Any]:
-    """Validate the annotations file and return the annotations as a dict.
-    
-    This method will verify the input annotations_file, and only take
-        known annotations to the returned dict.
-    """
-    if not annotations_file.is_file():
-        exit_with_err_msg(f"Annotations file {annotations_file} does not exist.")
-
-    _loaded = yaml.safe_load(annotations_file.read_text())
-    if not isinstance(_loaded, dict):
-        exit_with_err_msg(
-            f"Annotations file {annotations_file} is not a valid yaml file."
-        )
-
-    try:
-        _verified = AddImageCMDAnnotations.model_validate(_loaded)
-    except Exception as e:
-        logger.debug(f"invalid annotations file: {e}", exc_info=e)
-        exit_with_err_msg(
-            f"Annotations file {annotations_file} is not a valid annotations file: {e}"
-        )
-    return _verified.model_dump()
 
 
 def _parse_specs(sys_config_pairs: list[str]) -> dict[str, Path | None]:
@@ -255,7 +231,7 @@ def add_image_cmd(args: Namespace) -> None:
         f"Will add image payload from {rootfs_path} into OTA image at {image_root} ..."
     )
 
-    annotations = _validate_annotations(Path(args.annotations_file))
+    annotations = validate_annotations(Path(args.annotations_file), AddImageCMDAnnotations)
     if args.release_key:
         ota_release_key = OTAReleaseKey(args.release_key)
         logger.info(f"Release key specified from CLI args: {ota_release_key}")

@@ -16,9 +16,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import yaml
 from ota_image_libs.common import AliasEnabledModel
 from ota_image_libs.v1.annotation_keys import (
     BUILD_TOOL_VERSION,
@@ -36,6 +35,7 @@ from ota_image_libs.v1.annotation_keys import (
 from pydantic import Field
 
 from ota_image_builder._common import exit_with_err_msg
+from ota_image_builder.cmds._utils import validate_annotations
 from ota_image_builder.v1._image_index import init_ota_image
 
 if TYPE_CHECKING:
@@ -63,30 +63,6 @@ class InitCMDAnnotations(AliasEnabledModel):
     web_auto_catalog_id: str | None = Field(alias=WEB_AUTO_CATALOG_ID, default=None)
     web_auto_env: str | None = Field(alias=WEB_AUTO_ENV, default=None)
     # fmt: on
-
-def _validate_annotations(annotations_file: Path) -> dict[str, Any]:
-    """Validate the annotations file and return the annotations as a dict.
-    
-    This method will verify the input annotations_file, and only take
-        known annotations to the returned dict.
-    """
-    if not annotations_file.is_file():
-        exit_with_err_msg(f"Annotations file {annotations_file} does not exist.")
-
-    _loaded = yaml.safe_load(annotations_file.read_text())
-    if not isinstance(_loaded, dict):
-        exit_with_err_msg(
-            f"Annotations file {annotations_file} is not a valid yaml file."
-        )
-
-    try:
-        _verified = InitCMDAnnotations.model_validate(_loaded)
-    except Exception as e:
-        logger.debug(f"invalid annotations file: {e}", exc_info=e)
-        exit_with_err_msg(
-            f"Annotations file {annotations_file} is not a valid annotations file: {e}"
-        )
-    return _verified.model_dump()
 
 def init_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
@@ -124,7 +100,7 @@ def init_cmd(args: Namespace) -> None:
             else:
                 exit_with_err_msg(f"failed to prepare {image_root}: {e}")
 
-    annotations = _validate_annotations(annotations_file)
+    annotations = validate_annotations(annotations_file, InitCMDAnnotations)
     logger.info(f"Initialize empty OTA image at {image_root}")
     try:
         init_ota_image(image_root, annotations)
