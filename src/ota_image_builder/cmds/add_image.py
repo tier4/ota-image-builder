@@ -114,28 +114,27 @@ def add_image_cmd_args(
 
 def _validate_annotations(annotations_file: Path) -> dict[str, Any]:
     """Validate the annotations file and return the annotations as a dict.
-
-    NOTE: we only do validation here, directly passthrough the annotations as dict into
-          each metafile functions, these functions will validate the annotations and take
-          needed fields from the annotations by themselves.
+    
+    This method will verify the input annotations_file, and only take
+        known annotations to the returned dict.
     """
     if not annotations_file.is_file():
         exit_with_err_msg(f"Annotations file {annotations_file} does not exist.")
 
-    annotations = yaml.safe_load(annotations_file.read_text())
-    if not isinstance(annotations, dict):
+    _loaded = yaml.safe_load(annotations_file.read_text())
+    if not isinstance(_loaded, dict):
         exit_with_err_msg(
             f"Annotations file {annotations_file} is not a valid yaml file."
         )
 
     try:
-        AddImageCMDAnnotations.model_validate(annotations)
+        _verified = AddImageCMDAnnotations.model_validate(_loaded)
     except Exception as e:
         logger.debug(f"invalid annotations file: {e}", exc_info=e)
         exit_with_err_msg(
             f"Annotations file {annotations_file} is not a valid annotations file: {e}"
         )
-    return annotations
+    return _verified.model_dump()
 
 
 def _parse_specs(sys_config_pairs: list[str]) -> dict[str, Path | None]:
