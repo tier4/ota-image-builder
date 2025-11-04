@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import threading
 from collections.abc import Callable
@@ -134,3 +135,33 @@ def check_if_valid_ota_image(image_root: Path) -> bool:
         logger.debug(f"Resource directory not found: {resource_dir}")
         return False
     return True
+
+
+#
+# ------ NVIDIA Jetson related ------ #
+#
+
+NV_TEGRA_RELEASE_FPATH = "/etc/nv_tegra_release"
+NV_TEGRA_RELEASE_PA = re.compile(
+    (
+        r"# R(?P<major_ver>\d+) \(\w+\), REVISION: (?P<major_rev>\d+)\.(?P<minor_rev>\d+), "
+        r"GCID: (?P<gcid>\d+), BOARD: (?P<board>\w+), EABI: (?P<eabi>\w+)"
+    )
+)
+"""Example:
+
+# R35 (release), REVISION: 4.1, GCID: 33958178, BOARD: t186ref, EABI: aarch64, DATE: Tue Aug  1 19:57:35 UTC 2023
+"""
+
+
+def get_bsp_ver_info(nv_tegra_release: str) -> str | None:
+    """Parse BSP version from contents of /etc/nv_tegra_release."""
+    ma = NV_TEGRA_RELEASE_PA.match(nv_tegra_release)
+    if not ma:
+        logger.warning(f"invalid nv_tegra_release content: {nv_tegra_release}")
+        return
+
+    major_ver = int(ma.group("major_ver"))
+    major_rev = int(ma.group("major_rev"))
+    minor_rev = int(ma.group("minor_rev"))
+    return f"R{major_ver}.{major_rev}.{minor_rev}"
