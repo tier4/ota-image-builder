@@ -64,6 +64,7 @@ class InitCMDAnnotations(AliasEnabledModel):
     web_auto_env: str | None = Field(alias=WEB_AUTO_ENV, default=None)
     # fmt: on
 
+
 def init_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:

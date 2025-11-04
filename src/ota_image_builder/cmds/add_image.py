@@ -231,7 +231,9 @@ def add_image_cmd(args: Namespace) -> None:
         f"Will add image payload from {rootfs_path} into OTA image at {image_root} ..."
     )
 
-    annotations = validate_annotations(Path(args.annotations_file), AddImageCMDAnnotations)
+    annotations = validate_annotations(
+        Path(args.annotations_file), AddImageCMDAnnotations
+    )
     if args.release_key:
         ota_release_key = OTAReleaseKey(args.release_key)
         logger.info(f"Release key specified from CLI args: {ota_release_key}")

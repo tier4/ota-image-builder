@@ -25,9 +25,12 @@ from ota_image_builder._common import exit_with_err_msg
 
 logger = logging.getLogger(__name__)
 
-def validate_annotations(annotations_file: Path, model: type[BaseModel]) -> dict[str, Any]:
+
+def validate_annotations(
+    annotations_file: Path, model: type[BaseModel]
+) -> dict[str, Any]:
     """Validate the annotations file agaisnt <model> and return the annotations as a dict.
-    
+
     This method will verify the input annotations_file, and only take
         known annotations to the returned dict.
     """
