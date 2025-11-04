@@ -157,6 +157,10 @@ jobs:
           podman manifest add localhost/ota-image-builder:multi-arch \
             containers-storage:ota-image-builder:arm64 --arch arm64
 
+          # also separately tag each arch-specific image
+          podman tag ota-image-builder:x86_64 ${BASE_URL}:${VERSION}-x86_64
+          podman tag ota-image-builder:arm64 ${BASE_URL}:${VERSION}-arm64
+
           # tag generated image
           podman tag localhost/ota-image-builder:multi-arch \
             ${BASE_URL}:${VERSION} ${BASE_URL}:${RAW_VER}
@@ -185,6 +189,12 @@ jobs:
           # stop push that has mismatched tag version to prevent
           #   accidentally override already published images.
           [ "$VERSION" != "$RELEASE_TAG_VER" ] && echo "Error: Version mismatch - expected $RELEASE_TAG_VER but got $VERSION" >&2 && exit 1
+
+          # push multi-arch image
           podman manifest push \
             --all --compression-format zstd --compression-level 6 \
             ${BASE_URL}:${VERSION#v}
+
+          # push arch specific image
+          podman push --compression-format zstd --compression-level 6 ${BASE_URL}:${VERSION}-x86_64
+          podman push --compression-format zstd --compression-level 6 ${BASE_URL}:${VERSION}-arm64
