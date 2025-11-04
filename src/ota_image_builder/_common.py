@@ -154,11 +154,11 @@ NV_TEGRA_RELEASE_PA = re.compile(
 """
 
 
-def get_bsp_ver_info(nv_tegra_release: str) -> str | None:
+def get_bsp_ver_info(nv_tegra_release_str: str) -> str | None:
     """Parse BSP version from contents of /etc/nv_tegra_release."""
-    ma = NV_TEGRA_RELEASE_PA.match(nv_tegra_release)
+    ma = NV_TEGRA_RELEASE_PA.match(nv_tegra_release_str)
     if not ma:
-        logger.warning(f"invalid nv_tegra_release content: {nv_tegra_release}")
+        logger.warning(f"invalid nv_tegra_release content: {nv_tegra_release_str}")
         return
 
     major_ver = int(ma.group("major_ver"))
