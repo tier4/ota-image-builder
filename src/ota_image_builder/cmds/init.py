@@ -103,7 +103,7 @@ def init_cmd(args: Namespace) -> None:
     annotations = validate_annotations(annotations_file, InitCMDAnnotations)
     logger.info(f"ota-image-builder version: {version}")
     annotations[BUILD_TOOL_VERSION] = version
-    
+
     logger.info(f"Initialize empty OTA image at {image_root}")
     try:
         init_ota_image(image_root, annotations)
