@@ -6,11 +6,10 @@ on:
   # allow manually triggering the build
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   ota-image-builder_build:
+    permissions:
+      contents: write
     strategy:
       matrix:
         platform: [x86_64, arm64]
@@ -68,3 +67,134 @@ jobs:
         with:
           files: |
             ./dist/*
+
+  ota-image-builder_image_build:
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        platform: [x86_64, arm64]
+        # NOTE: we do native build for both platforms
+        include:
+          - platform: x86_64
+            os: ubuntu-22.04
+          - platform: arm64
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build ota-image-builder docker image release
+        run: |
+          docker build \
+            -f docker/builder_release/Dockerfile \
+            -t ota-image-builder:${{ matrix.platform }} .
+
+      - name: Test build and check version
+        id: version_check
+        run: |
+          docker run \
+            --rm ota-image-builder:${{ matrix.platform }} version > version.txt
+          echo "release version is `cat version.txt`."
+
+      - name: Export built image
+        run: |
+          docker save ota-image-builder:${{ matrix.platform }} \
+            --output ./ota-image-builder.tar
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-image-builder_${{ matrix.platform }}
+          path: |
+            ./version.txt
+            ./ota-image-builder.tar
+
+  publish_ota-image-builder_images:
+    needs: ["ota-image-builder_image_build"]
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: ghcr.io/tier4/ota-image-builder/ota-image-builder
+    steps:
+      - name: Install podman
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y podman
+
+      - name: Download x86_64 artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ota-image-builder_x86_64
+          path: x86_64_dist
+
+      - name: Download arm64 artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ota-image-builder_arm64
+          path: arm64_dist
+
+      - name: Load docker images and merge manifests
+        id: merge_image
+        run: |
+          [ `cat x86_64_dist/version.txt` != `cat arm64_dist/version.txt` ] && exit 1
+          VERSION=`cat x86_64_dist/version.txt`
+          RAW_VER="${VERSION#v}"
+          echo "release_ver=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          # load images
+          podman load -i x86_64_dist/ota-image-builder.tar
+          podman load -i arm64_dist/ota-image-builder.tar
+
+          # generate multi-arch image
+          podman manifest create localhost/ota-image-builder:multi-arch
+          podman manifest add localhost/ota-image-builder:multi-arch \
+            containers-storage:ota-image-builder:x86_64 --arch x86_64
+          podman manifest add localhost/ota-image-builder:multi-arch \
+            containers-storage:ota-image-builder:arm64 --arch arm64
+
+          # also separately tag each arch-specific image
+          podman tag ota-image-builder:x86_64 ${BASE_URL}:${RAW_VER}-x86_64
+          podman tag ota-image-builder:arm64 ${BASE_URL}:${RAW_VER}-arm64
+
+          # tag generated image
+          podman tag localhost/ota-image-builder:multi-arch ${BASE_URL}:${RAW_VER}
+          podman rmi localhost/ota-image-builder:multi-arch
+
+          # inspect manifest
+          podman manifest inspect ${BASE_URL}:${RAW_VER}
+
+      - name: Login to GHCR
+        id: podman_login
+        if: >
+          github.event_name == 'release' &&
+          github.event.action == 'published'
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push ota-image-builder docker image
+        if: ${{ steps.podman_login.conclusion != 'skipped' }}
+        env:
+          VERSION: ${{ steps.merge_image.outputs.release_ver }}
+          RELEASE_TAG_VER: ${{ github.event.release.tag_name }}
+        run: |
+          # stop push that has mismatched tag version to prevent
+          #   accidentally override already published images.
+          [ "$VERSION" != "$RELEASE_TAG_VER" ] && echo "Error: Version mismatch - expected $RELEASE_TAG_VER but got $VERSION" >&2 && exit 1
+
+          RAW_VER="${VERSION#v}"
+          # push arch specific image
+          podman push --compression-format zstd --compression-level 6 ${BASE_URL}:${RAW_VER}-x86_64
+          podman push --compression-format zstd --compression-level 6 ${BASE_URL}:${RAW_VER}-arm64
+
+          # push multi-arch image
+          podman manifest push \
+            --all --compression-format zstd --compression-level 6 \
+            ${BASE_URL}:${RAW_VER}

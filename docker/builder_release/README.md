@@ -1,0 +1,31 @@
+# OTA image builder release as docker image
+
+## Images
+
+The distro is built with python3.13-bookworm, as evaluator builder now is based on ubuntu 24.04.
+
+The images are available as follow:
+
+1. `ghcr.io/tier4/ota-image-builder/ota-image-builder:{major}.{minor}.{patch}`,
+like `ghcr.io/tier4/ota-image-builder/ota-image-builder:0.7.0`.
+
+Both x86_64 and arm64 targets are supported.
+
+## Installing ota-image-builder from the image
+
+The distribution can be found in `/ota-image-builder` folder in the image,
+and the entrypoint binary is `/ota-image-builder/ota-image-builder`.
+
+Your can add `ota-image-builder` to your docker image by updating your dockerfile as follow:
+
+```dockerfile
+ARG YOUR_BASE_IMAGE
+ARG OTA_IMAGE_BUILDER_VER=0.7.0
+
+# will automatically choose the x86_64 or arm64 ota-image-builder variants
+FROM ghcr.io/tier4/ota-image-builder:${OTA_IMAGE_BUILDER_VER} AS ota-image-builder
+
+FROM ${YOUR_BASE_IMAGE}
+
+COPY --from=ota-image-builder /ota-image-builder /opt/ota-image-builder
+```
