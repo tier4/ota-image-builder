@@ -18,7 +18,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
 from ota_image_libs.common import AliasEnabledModel
 from ota_image_libs.v1.annotation_keys import (
     BUILD_TOOL_VERSION,
@@ -36,6 +35,7 @@ from ota_image_libs.v1.annotation_keys import (
 from pydantic import Field
 
 from ota_image_builder._common import exit_with_err_msg
+from ota_image_builder.cmds._utils import validate_annotations
 from ota_image_builder.v1._image_index import init_ota_image
 
 if TYPE_CHECKING:
@@ -101,16 +101,7 @@ def init_cmd(args: Namespace) -> None:
             else:
                 exit_with_err_msg(f"failed to prepare {image_root}: {e}")
 
-    if not annotations_file.is_file():
-        exit_with_err_msg(f"{annotations_file} not found!")
-
-    try:
-        annotations = yaml.safe_load(annotations_file.read_text())
-        InitCMDAnnotations.model_validate(annotations)
-    except Exception as e:
-        logger.debug(f"invalid annotations yaml file: {e}", exc_info=e)
-        exit_with_err_msg(f"invalid annotation files {annotations_file}: {e}")
-
+    annotations = validate_annotations(annotations_file, InitCMDAnnotations)
     logger.info(f"Initialize empty OTA image at {image_root}")
     try:
         init_ota_image(image_root, annotations)
