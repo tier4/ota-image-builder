@@ -35,6 +35,7 @@ from ota_image_libs.v1.annotation_keys import (
 from pydantic import Field
 
 from ota_image_builder._common import exit_with_err_msg
+from ota_image_builder._version import version
 from ota_image_builder.cmds._utils import validate_annotations
 from ota_image_builder.v1._image_index import init_ota_image
 
@@ -49,8 +50,6 @@ class InitCMDAnnotations(AliasEnabledModel):
     """Required annotations for initializing an empty OTA image."""
 
     # fmt: off
-    build_tool_version: str = Field(alias=BUILD_TOOL_VERSION)
-
     pilot_auto_platform: str | None = Field(alias=PILOT_AUTO_PLATFORM, default=None)
     pilot_auto_source_repo: str | None = Field(alias=PILOT_AUTO_PROJECT_SOURCE, default=None)
     pilot_auto_version: str | None = Field(alias=PILOT_AUTO_PROJECT_VERSION, default=None)
@@ -102,6 +101,9 @@ def init_cmd(args: Namespace) -> None:
                 exit_with_err_msg(f"failed to prepare {image_root}: {e}")
 
     annotations = validate_annotations(annotations_file, InitCMDAnnotations)
+    logger.info(f"ota-image-builder version: {version}")
+    annotations[BUILD_TOOL_VERSION] = version
+    
     logger.info(f"Initialize empty OTA image at {image_root}")
     try:
         init_ota_image(image_root, annotations)
