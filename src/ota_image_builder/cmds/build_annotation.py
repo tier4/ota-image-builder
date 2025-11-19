@@ -40,7 +40,6 @@ def _load_annotation_keys() -> set[str]:
     return _loaded_annotations
 
 
-
 def build_annotation_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
@@ -72,6 +71,7 @@ def build_annotation_cmd_args(
     )
     build_annotation_cmd_arg_parser.set_defaults(handler=build_annotation_cmd)
 
+
 def _parse_kv(_in: list[str], *, available_keys: frozenset[str]) -> dict[str, str]:
     res = {}
     for _raw in _in:
@@ -82,6 +82,7 @@ def _parse_kv(_in: list[str], *, available_keys: frozenset[str]) -> dict[str, st
             exit_with_err_msg(f"invalid annotation key: {k}")
         res[k] = v[0]
     return res
+
 
 def _load_base(base_f: Path) -> dict[str, str]:
     try:
@@ -94,13 +95,16 @@ def _load_base(base_f: Path) -> dict[str, str]:
         logger.exception(_err_msg)
         exit_with_err_msg(_err_msg)
 
+
 def build_annotation_cmd(args: Namespace) -> None:
     logger.debug(f"calling {build_annotation_cmd.__name__} with {args}")
     available_annotation_keys = frozenset(_load_annotation_keys())
 
     # load input
     add_or = _parse_kv(args.add_or or [], available_keys=available_annotation_keys)
-    add_replace = _parse_kv(args.add_replace or [], available_keys=available_annotation_keys)
+    add_replace = _parse_kv(
+        args.add_replace or [], available_keys=available_annotation_keys
+    )
     if not add_or and not add_replace:
         exit_with_err_msg("must specify one of `--add-or` or `--add-replace`!")
 
