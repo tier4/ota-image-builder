@@ -53,21 +53,21 @@ def build_annotation_cmd_args(
     )
     build_annotation_cmd_arg_parser.add_argument(
         "-i",
-        help="The base annotation file to load, expected to be a yaml file contain k-v pairs.",
+        help="The base annotation file to load, expected to be a yaml file containing k-v pairs.",
     )
     build_annotation_cmd_arg_parser.add_argument(
         "-o",
-        help="The output of the built annotation files.",
+        help="The output target of the built annotations.",
     )
     build_annotation_cmd_arg_parser.add_argument(
         "--add-or",
         action="append",
-        help="Add one annotation by `<k>=<v>`, if this annotation already presented, skip adding.",
+        help="Add one annotation by `<k>=<v>`, if this annotation already presents, skip adding it.",
     )
     build_annotation_cmd_arg_parser.add_argument(
         "--add-replace",
         action="append",
-        help="Add one annotation by `<k>=<v>`, if this annotation already presented, overriding it.",
+        help="Add one annotation by `<k>=<v>`, if this annotation already presents, override it.",
     )
     build_annotation_cmd_arg_parser.set_defaults(handler=build_annotation_cmd)
 
