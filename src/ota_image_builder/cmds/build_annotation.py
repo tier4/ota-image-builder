@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from pprint import pprint
 from typing import TYPE_CHECKING
 
 import yaml
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def _load_annotation_keys() -> set[str]:
     _loaded_annotations = set()
-    for k, v in annotation_keys.__dict__:
+    for k, v in annotation_keys.__dict__.items():
         if k.startswith("_") or not isinstance(v, str):
             continue
         _loaded_annotations.add(v)
@@ -57,7 +58,6 @@ def build_annotation_cmd_args(
     )
     build_annotation_cmd_arg_parser.add_argument(
         "-o",
-        required=True,
         help="The output of the built annotation files.",
     )
     build_annotation_cmd_arg_parser.add_argument(
@@ -80,7 +80,7 @@ def _parse_kv(_in: list[str], *, available_keys: frozenset[str]) -> dict[str, st
             exit_with_err_msg(f"invalid annotation kv pair: {_raw}")
         if k not in available_keys:
             exit_with_err_msg(f"invalid annotation key: {k}")
-        res[k] = v
+        res[k] = v[0]
     return res
 
 def _load_base(base_f: Path) -> dict[str, str]:
@@ -99,8 +99,8 @@ def build_annotation_cmd(args: Namespace) -> None:
     available_annotation_keys = frozenset(_load_annotation_keys())
 
     # load input
-    add_or = _parse_kv(args.add_or, available_keys=available_annotation_keys)
-    add_replace = _parse_kv(args.add_replace, available_keys=available_annotation_keys)
+    add_or = _parse_kv(args.add_or or [], available_keys=available_annotation_keys)
+    add_replace = _parse_kv(args.add_replace or [], available_keys=available_annotation_keys)
     if not add_or and not add_replace:
         exit_with_err_msg("must specify one of `--add-or` or `--add-replace`!")
 
@@ -113,7 +113,7 @@ def build_annotation_cmd(args: Namespace) -> None:
         base = _load_base(base_f)
 
     # process add_or
-    for k, v in add_or:
+    for k, v in add_or.items():
         if k not in base:
             base[k] = v
 
@@ -122,9 +122,12 @@ def build_annotation_cmd(args: Namespace) -> None:
 
     # output built annotation file
     output = args.o
-    try:
-        Path(output).write_text(yaml.dump(base))
-    except Exception as e:
-        _err_msg = f"failed to write to {output}: {e!r}"
-        logger.exception(_err_msg)
-        exit_with_err_msg(_err_msg)
+    if output:
+        try:
+            Path(output).write_text(yaml.dump(base))
+        except Exception as e:
+            _err_msg = f"failed to write to {output}: {e!r}"
+            logger.exception(_err_msg)
+            exit_with_err_msg(_err_msg)
+    else:
+        pprint(base)
