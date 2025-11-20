@@ -15,6 +15,7 @@
 from .add_image import add_image_cmd_args
 from .add_otaclient_package import add_otaclient_package_cmd_args
 from .add_otaclient_package_compat import add_otaclient_package_compat_cmd_args
+from .build_annotation import build_annotation_cmd_args
 from .finalize import finalize_cmd_args
 from .init import init_cmd_args
 from .pack_artifact import pack_artifact_cmd_args
@@ -23,6 +24,7 @@ from .sign import sign_cmd_args
 
 __all__ = [
     "init_cmd_args",
+    "build_annotation_cmd_args",
     "add_image_cmd_args",
     "sign_cmd_args",
     "finalize_cmd_args",

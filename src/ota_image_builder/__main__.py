@@ -22,7 +22,8 @@ OTA_IMAGE_TOOLS = ["ota_image_tools", "ota-image-tools"]
 if __name__ == "__main__":
     freeze_support()
 
-if __name__ == "__main__":
+
+def main():
     from ota_image_builder._common import configure_logging
 
     configure_logging()
@@ -39,3 +40,7 @@ if __name__ == "__main__":
     from ota_image_builder.main import main as _builder_main
 
     _builder_main()
+
+
+if __name__ == "__main__":
+    main()
