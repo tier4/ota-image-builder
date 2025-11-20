@@ -37,12 +37,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-allowed_user_annotations = frozenset({
-    PILOT_AUTO_PLATFORM,
-    PILOT_AUTO_PROJECT_VERSION,
-    PLATFORM_ECU_HARDWARE_MODEL,
-    PLATFORM_ECU_HARDWARE_SERIES
-})
+allowed_user_annotations = frozenset(
+    {
+        PILOT_AUTO_PLATFORM,
+        PILOT_AUTO_PROJECT_VERSION,
+        PLATFORM_ECU_HARDWARE_MODEL,
+        PLATFORM_ECU_HARDWARE_SERIES,
+    }
+)
+
 
 def _load_annotation_keys() -> set[str]:
     _loaded_annotations = set()
@@ -105,6 +108,7 @@ def _parse_kv(_in: list[str], *, available_keys: frozenset[str]) -> dict[str, st
         res[k] = v[0]
     return res
 
+
 _parse_user_annotations = partial(_parse_kv, available_keys=allowed_user_annotations)
 
 
@@ -119,6 +123,7 @@ def _load_base(base_f: Path) -> dict[str, str]:
         logger.exception(_err_msg)
         exit_with_err_msg(_err_msg)
 
+
 def build_annotation_cmd(args: Namespace) -> None:
     logger.debug(f"calling {build_annotation_cmd.__name__} with {args}")
     available_annotation_keys = frozenset(_load_annotation_keys())
@@ -130,7 +135,9 @@ def build_annotation_cmd(args: Namespace) -> None:
     )
     user_anno = _parse_user_annotations(args.add_user_annotation or [])
     if not add_or and not add_replace and not user_anno:
-        logger.warning("none of `--add-or` or `--add-replace` or `--add-user-annotation` is specified")
+        logger.warning(
+            "none of `--add-or` or `--add-replace` or `--add-user-annotation` is specified"
+        )
 
     # load base
     base = {}
