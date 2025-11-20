@@ -15,12 +15,19 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from pathlib import Path
 from pprint import pprint
 from typing import TYPE_CHECKING
 
 import yaml
 from ota_image_libs.v1 import annotation_keys
+from ota_image_libs.v1.annotation_keys import (
+    PILOT_AUTO_PLATFORM,
+    PILOT_AUTO_PROJECT_VERSION,
+    PLATFORM_ECU_HARDWARE_MODEL,
+    PLATFORM_ECU_HARDWARE_SERIES,
+)
 
 from ota_image_builder._common import exit_with_err_msg
 
@@ -30,6 +37,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+allowed_user_annotations = frozenset({
+    PILOT_AUTO_PLATFORM,
+    PILOT_AUTO_PROJECT_VERSION,
+    PLATFORM_ECU_HARDWARE_MODEL,
+    PLATFORM_ECU_HARDWARE_SERIES
+})
 
 def _load_annotation_keys() -> set[str]:
     _loaded_annotations = set()
@@ -60,6 +73,12 @@ def build_annotation_cmd_args(
         help="The output target of the built annotations.",
     )
     build_annotation_cmd_arg_parser.add_argument(
+        "--add-user-annotation",
+        action="append",
+        help="Add annotation provided by user(at webauto-ci.yml) by `<k>=<v>`, only the following annotations are allowed: "
+        "",
+    )
+    build_annotation_cmd_arg_parser.add_argument(
         "--add-or",
         action="append",
         help="Add one annotation by `<k>=<v>`, if this annotation already presents, skip adding it.",
@@ -86,6 +105,8 @@ def _parse_kv(_in: list[str], *, available_keys: frozenset[str]) -> dict[str, st
         res[k] = v[0]
     return res
 
+_parse_user_annotations = partial(_parse_kv, available_keys=allowed_user_annotations)
+
 
 def _load_base(base_f: Path) -> dict[str, str]:
     try:
@@ -98,7 +119,6 @@ def _load_base(base_f: Path) -> dict[str, str]:
         logger.exception(_err_msg)
         exit_with_err_msg(_err_msg)
 
-
 def build_annotation_cmd(args: Namespace) -> None:
     logger.debug(f"calling {build_annotation_cmd.__name__} with {args}")
     available_annotation_keys = frozenset(_load_annotation_keys())
@@ -108,8 +128,9 @@ def build_annotation_cmd(args: Namespace) -> None:
     add_replace = _parse_kv(
         args.add_replace or [], available_keys=available_annotation_keys
     )
-    if not add_or and not add_replace:
-        logger.warning("none of `--add-or` or `--add-replace` is specified")
+    user_anno = _parse_user_annotations(args.add_user_annotation or [])
+    if not add_or and not add_replace and not user_anno:
+        logger.warning("none of `--add-or` or `--add-replace` or `--add-user-annotation` is specified")
 
     # load base
     base = {}
@@ -121,8 +142,11 @@ def build_annotation_cmd(args: Namespace) -> None:
 
     # process add_or
     for k, v in add_or.items():
-        if k not in base:
-            base[k] = v
+        base.setdefault(k, v)
+
+    # process add_user_annotation, note that user-input has the lowest priority
+    for k, v in user_anno.items():
+        base.setdefault(k, v)
 
     # process add_replace
     base.update(add_replace)
