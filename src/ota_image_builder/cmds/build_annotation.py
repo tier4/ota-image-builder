@@ -77,9 +77,12 @@ def _parse_kv(_in: list[str], *, available_keys: frozenset[str]) -> dict[str, st
     for _raw in _in:
         k, *v = _raw.split("=", maxsplit=1)
         if len(v) != 1:
-            exit_with_err_msg(f"invalid annotation kv pair: {_raw}")
+            logger.info(f"ignore invalid annotation kv pair: {_raw}")
+            continue
+
         if k not in available_keys:
-            exit_with_err_msg(f"invalid annotation key: {k}")
+            logger.info(f"ignore invalid annotation key: {k}")
+            continue
         res[k] = v[0]
     return res
 
@@ -106,7 +109,7 @@ def build_annotation_cmd(args: Namespace) -> None:
         args.add_replace or [], available_keys=available_annotation_keys
     )
     if not add_or and not add_replace:
-        exit_with_err_msg("must specify one of `--add-or` or `--add-replace`!")
+        logger.warning("none of `--add-or` or `--add-replace` is specified")
 
     # load base
     base = {}
