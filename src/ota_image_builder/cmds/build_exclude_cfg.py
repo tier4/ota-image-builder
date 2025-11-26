@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# fmt: off
 invalid_patterns_pa = [
     re.compile(r"^\./*$"),                            # .
     re.compile(r"^\.\./*$"),                          # ..
@@ -35,6 +36,7 @@ invalid_patterns_pa = [
     re.compile(r"^/boot/ota.*$"),                     # /boot/ota
     re.compile(r"^/home/autoware.*/build$"),    # /home/autoware/*/build
 ]
+# fmt: on
 
 def build_exclude_cfg_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
