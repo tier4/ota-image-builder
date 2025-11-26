@@ -27,13 +27,14 @@ from ota_image_builder.cmds import (
     add_image_cmd_args,
     add_otaclient_package_cmd_args,
     add_otaclient_package_compat_cmd_args,
+    build_annotation_cmd_args,
+    build_exclude_cfg_cmd_args,
     finalize_cmd_args,
     init_cmd_args,
     pack_artifact_cmd_args,
     prepare_sysimg_cmd_args,
     sign_cmd_args,
 )
-from ota_image_builder.cmds.build_exclude_cfg import build_exclude_cfg_cmd_args
 
 from ._common import configure_logging
 from ._version import version
@@ -96,6 +97,7 @@ def main():
     prepare_sysimg_cmd_args(sub_arg_parser)
     init_cmd_args(sub_arg_parser)
     build_exclude_cfg_cmd_args(sub_arg_parser)
+    build_annotation_cmd_args(sub_arg_parser)
     add_image_cmd_args(sub_arg_parser)
     add_otaclient_package_cmd_args(sub_arg_parser)
     add_otaclient_package_compat_cmd_args(sub_arg_parser)

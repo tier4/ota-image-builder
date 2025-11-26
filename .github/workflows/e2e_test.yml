@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout commit
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Build test base container image
         run: |
           docker build -f docker/e2e_test_base/Dockerfile -t ota_image_builder_test .
