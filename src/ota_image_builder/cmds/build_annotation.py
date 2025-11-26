@@ -147,12 +147,12 @@ def build_annotation_cmd(args: Namespace) -> None:
             exit_with_err_msg(f"base file {base_f} specified but not found!")
         base = _load_base(base_f)
 
-    # process add_or
-    for k, v in add_or.items():
+    # process add_user_annotation
+    for k, v in user_anno.items():
         base.setdefault(k, v)
 
-    # process add_user_annotation, note that user-input has the lowest priority
-    for k, v in user_anno.items():
+    # process add_or
+    for k, v in add_or.items():
         base.setdefault(k, v)
 
     # process add_replace
