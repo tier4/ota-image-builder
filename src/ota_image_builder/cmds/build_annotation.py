@@ -78,8 +78,9 @@ def build_annotation_cmd_args(
     build_annotation_cmd_arg_parser.add_argument(
         "--add-user-annotation",
         action="append",
-        help="Add annotation provided by user(at webauto-ci.yml) by `<k>=<v>`, only the following annotations are allowed: "
-        "",
+        help="Add annotation provided by user(at webauto-ci.yml) by `<k>=<v>`, currently only the following annotations are allowed: "
+        "vnd.tier4.pilot-auto.platform, vnd.tier4.pilot-auto.project.version, vnd.tier4.pilot-auto.platform.ecu.hardware-model and "
+        "vnd.tier4.pilot-auto.platform.ecu.hardware-series.",
     )
     build_annotation_cmd_arg_parser.add_argument(
         "--add-or",
