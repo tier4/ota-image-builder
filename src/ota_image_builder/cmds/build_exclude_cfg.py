@@ -38,6 +38,7 @@ invalid_patterns_pa = [
 ]
 # fmt: on
 
+
 def build_exclude_cfg_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
@@ -57,7 +58,7 @@ def build_exclude_cfg_cmd_args(
     )
     build_exclude_cfg_cmd_arg_parser.add_argument(
         "-o",
-        help="The output target of the built merged exclude cfg file. " \
+        help="The output target of the built merged exclude cfg file. "
         "If not specified, will directly output to stdout.",
     )
     build_exclude_cfg_cmd_arg_parser.set_defaults(handler=build_exclude_cfg_cmd)
@@ -66,9 +67,7 @@ def build_exclude_cfg_cmd_args(
 def _load_input(f: Path) -> set[str]:
     res = set()
     try:
-        loaded = (
-            line.strip() for line in f.read_text().splitlines()
-        )
+        loaded = (line.strip() for line in f.read_text().splitlines())
         for _pattern in loaded:
             for _filter_pa in invalid_patterns_pa:
                 if _filter_pa.match(_pattern):
@@ -81,6 +80,7 @@ def _load_input(f: Path) -> set[str]:
         _err_msg = f"failed to load input file: {e!r}"
         logger.exception(_err_msg)
         exit_with_err_msg(_err_msg)
+
 
 def build_exclude_cfg_cmd(args: Namespace) -> None:
     logger.debug(f"calling {build_exclude_cfg_cmd.__name__} with {args}")
