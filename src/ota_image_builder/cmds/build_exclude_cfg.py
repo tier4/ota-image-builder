@@ -34,7 +34,7 @@ invalid_patterns_pa = [
     re.compile(r"^\.\./*$"),                          # ..
     re.compile(r"^/+$"),                              # /
     re.compile(r"^/boot/ota.*$"),                     # /boot/ota
-    re.compile(r"^/home/autoware.*/build$"),    # /home/autoware/*/build
+    re.compile(r"^/home/autoware.*/build$"),          # /home/autoware/*/build
 ]
 # fmt: on
 
@@ -46,7 +46,7 @@ def build_exclude_cfg_cmd_args(
         name="build-exclude-cfg",
         help="Build extra exclude cfg file for OTA image build. "
         "Note that this command will filter away invalid patterns.",
-        description="Build annotation file for OTA image build.",
+        description="Build extra exclude cfg file for OTA image build.",
         parents=parent_parser,
     )
     build_exclude_cfg_cmd_arg_parser.add_argument(
