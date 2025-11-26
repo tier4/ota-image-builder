@@ -29,11 +29,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 invalid_patterns_pa = [
-    re.compile(r"\."),                            # .
-    re.compile(r"\.\."),                          # ..
-    re.compile(r"/"),                             # /
-    re.compile(r"/boot/ota.*"),                   # /boot/ota
-    re.compile(r"/home/autoware[^/]*/.*build"),   # /home/autoware/*/build
+    re.compile(r"^\./*$"),                            # .
+    re.compile(r"^\.\./*$"),                          # ..
+    re.compile(r"^/+$"),                              # /
+    re.compile(r"^/boot/ota.*$"),                     # /boot/ota
+    re.compile(r"^/home/autoware.*/build$"),    # /home/autoware/*/build
 ]
 
 def build_exclude_cfg_cmd_args(
