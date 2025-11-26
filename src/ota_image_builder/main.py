@@ -33,6 +33,7 @@ from ota_image_builder.cmds import (
     prepare_sysimg_cmd_args,
     sign_cmd_args,
 )
+from ota_image_builder.cmds.build_exclude_cfg import build_exclude_cfg_cmd_args
 
 from ._common import configure_logging
 from ._version import version
@@ -94,6 +95,7 @@ def main():
 
     prepare_sysimg_cmd_args(sub_arg_parser)
     init_cmd_args(sub_arg_parser)
+    build_exclude_cfg_cmd_args(sub_arg_parser)
     add_image_cmd_args(sub_arg_parser)
     add_otaclient_package_cmd_args(sub_arg_parser)
     add_otaclient_package_compat_cmd_args(sub_arg_parser)
