@@ -96,7 +96,8 @@ def build_exclude_cfg_cmd(args: Namespace) -> None:
         try:
             with open(output, "w") as f:
                 for _pattern in merged:
-                    print(_pattern, f)
+                    print(_pattern, file=f)
+                f.flush()
         except Exception as e:
             _err_msg = f"failed to write to {output}: {e!r}"
             logger.exception(_err_msg)
