@@ -184,7 +184,10 @@ def sign_cmd_args(
     sign_cmd_arg_parser.add_argument(
         "--sign-key",
         help="OTA image signing key in PEM format.",
-        required=True,
+    )
+    sign_cmd_arg_parser.add_argument(
+        "--sign-key-content",
+        help="Directly provide the content of sign key in PEM format. If specified, will have higher priority over --sign-key.",
     )
     sign_cmd_arg_parser.add_argument(
         "--sign-key-passwd",
@@ -222,12 +225,15 @@ def sign_cmd(args: Namespace) -> None:
 
     sign_cert_f = Path(args.sign_cert)
     sign_key_f = Path(args.sign_key)
+    sign_key_content = args.sign_key_content
+
+    if not sign_key_f and not sign_key_content:
+        exit_with_err_msg("must specify one of --sign-key or --sign-key-content!")
+
     ca_certs_fs = [Path(_ca_cert) for _ca_cert in args.ca_cert]
 
     if not sign_cert_f.is_file():
         exit_with_err_msg(f"{sign_cert_f=} not found.")
-    if not sign_key_f.is_file():
-        exit_with_err_msg(f"{sign_key_f=} not found.")
     for _ca_cert in ca_certs_fs:
         if not _ca_cert.is_file():
             exit_with_err_msg(f"CA cert {_ca_cert} is specified, but not found.")
@@ -243,7 +249,11 @@ def sign_cmd(args: Namespace) -> None:
     logger.info(f"Will sign OTA image at {image_root} ...")
 
     sign_key_passwd = args.sign_key_passwd.encode() if args.sign_key_passwd else None
-    sign_key = sign_key_f.read_bytes()
+    if sign_key_content:
+        sign_key = str(sign_key_content).encode()
+    else:
+        sign_key = sign_key_f.read_bytes()
+    
     try:
         sign_image(
             image_root,
