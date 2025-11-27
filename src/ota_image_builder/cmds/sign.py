@@ -224,7 +224,10 @@ def _load_private_key(_in: str | None) -> bytes:
     if _in.startswith("-----BEGIN"):
         return _in.encode()
     if _in == "-":
-        return sys.stdin.buffer.read()
+        try:
+            return sys.stdin.buffer.read()
+        except Exception as e:
+            exit_with_err_msg(f"failed to read private key from stdin: {e!r}")
 
     try:
         return Path(_in).read_bytes()
