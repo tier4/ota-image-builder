@@ -252,7 +252,7 @@ def sign_cmd(args: Namespace) -> None:
         sign_key = Path(sign_key_f).read_bytes()
     else:
         exit_with_err_msg("must specify one of --sign-key or --sign-key-content!")
-    
+
     try:
         sign_image(
             image_root,
