@@ -224,11 +224,8 @@ def sign_cmd(args: Namespace) -> None:
         exit_with_err_msg(f"{image_root} doesn't hold a valid OTA image.")
 
     sign_cert_f = Path(args.sign_cert)
-    sign_key_f = Path(args.sign_key)
+    sign_key_f = args.sign_key
     sign_key_content = args.sign_key_content
-
-    if not sign_key_f and not sign_key_content:
-        exit_with_err_msg("must specify one of --sign-key or --sign-key-content!")
 
     ca_certs_fs = [Path(_ca_cert) for _ca_cert in args.ca_cert]
 
@@ -251,8 +248,10 @@ def sign_cmd(args: Namespace) -> None:
     sign_key_passwd = args.sign_key_passwd.encode() if args.sign_key_passwd else None
     if sign_key_content:
         sign_key = str(sign_key_content).encode()
+    elif sign_key_f:
+        sign_key = Path(sign_key_f).read_bytes()
     else:
-        sign_key = sign_key_f.read_bytes()
+        exit_with_err_msg("must specify one of --sign-key or --sign-key-content!")
     
     try:
         sign_image(
