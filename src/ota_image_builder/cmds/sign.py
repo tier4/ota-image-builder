@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import typing
 from base64 import urlsafe_b64encode
 from hashlib import sha256
@@ -183,7 +184,9 @@ def sign_cmd_args(
     )
     sign_cmd_arg_parser.add_argument(
         "--sign-key",
-        help="OTA image signing key in PEM format.",
+        help="OTA image signing key in PEM format. "
+        "This arg takes either a file path, or plain PEM format private key string. "
+        "It also takes `-`, ota-image-builder then will take the private key string from stdin.",
         required=True,
     )
     sign_cmd_arg_parser.add_argument(
@@ -214,6 +217,26 @@ def sign_cmd_args(
     sign_cmd_arg_parser.set_defaults(handler=sign_cmd)
 
 
+def _load_private_key(_in: str | None) -> bytes:
+    if not _in:
+        exit_with_err_msg("empty input sign key, abort!")
+
+    if _in.startswith("-----BEGIN"):
+        return _in.encode()
+    if _in == "-":
+        try:
+            return sys.stdin.buffer.read()
+        except Exception as e:
+            exit_with_err_msg(f"failed to read private key from stdin: {e!r}")
+
+    try:
+        return Path(_in).read_bytes()
+    except FileNotFoundError:
+        exit_with_err_msg("the specified key file doesn't exist!")
+    except Exception as e:
+        exit_with_err_msg(f"failed to read private key: {e!r}")
+
+
 def sign_cmd(args: Namespace) -> None:
     logger.debug(f"calling {sign_cmd.__name__} with {args}")
     image_root = Path(args.image_root)
@@ -221,13 +244,10 @@ def sign_cmd(args: Namespace) -> None:
         exit_with_err_msg(f"{image_root} doesn't hold a valid OTA image.")
 
     sign_cert_f = Path(args.sign_cert)
-    sign_key_f = Path(args.sign_key)
     ca_certs_fs = [Path(_ca_cert) for _ca_cert in args.ca_cert]
 
     if not sign_cert_f.is_file():
         exit_with_err_msg(f"{sign_cert_f=} not found.")
-    if not sign_key_f.is_file():
-        exit_with_err_msg(f"{sign_key_f=} not found.")
     for _ca_cert in ca_certs_fs:
         if not _ca_cert.is_file():
             exit_with_err_msg(f"CA cert {_ca_cert} is specified, but not found.")
@@ -243,7 +263,7 @@ def sign_cmd(args: Namespace) -> None:
     logger.info(f"Will sign OTA image at {image_root} ...")
 
     sign_key_passwd = args.sign_key_passwd.encode() if args.sign_key_passwd else None
-    sign_key = sign_key_f.read_bytes()
+    sign_key = _load_private_key(args.sign_key)
     try:
         sign_image(
             image_root,
