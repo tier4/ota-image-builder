@@ -127,13 +127,13 @@ jobs:
           sudo apt-get install --no-install-recommends -y podman
 
       - name: Download x86_64 artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: ota-image-builder_x86_64
           path: x86_64_dist
 
       - name: Download arm64 artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: ota-image-builder_arm64
           path: arm64_dist
