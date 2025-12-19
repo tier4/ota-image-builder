@@ -69,16 +69,19 @@ class BundleCompressedResult(NamedTuple):
     compressed_size: int
 
 
-def _batch_entries(
+def _batch_entries_with_filter(
     entries_to_bundle_gen: Generator[EntryToBeBundled],
     *,
     expected_bundle_size: int,
     min_bundle_ratio: float = MINIMUM_BUNDLE_SIZE_RATIO,
+    excluded_resources: set[bytes],
 ) -> Generator[tuple[int, list[EntryToBeBundled]]]:
     _batch = []
     _this_batch_size = 0
     for _entry in entries_to_bundle_gen:
-        _, _, _entry_size = _entry
+        _, _digest, _entry_size = _entry
+        if _digest in excluded_resources:
+            continue
 
         _batch.append(_entry)
         _this_batch_size += _entry_size
@@ -200,7 +203,9 @@ class BundleFilterProcesser:
         bundle_upper_bound: int = cfg.BUNDLE_UPPER_THRESHOULD,
         bundle_blob_size: int = cfg.BUNDLE_SIZE,
         bundle_compressed_max_sum: int = cfg.BUNDLES_COMPRESSED_MAXIMUM_SUM,
+        protected_resources: set[bytes],
     ) -> None:
+        self._protected_resources = protected_resources
         self._resource_dir = resource_dir
         self._db_helper = ResourceTableDBHelper(rst_dbf)
         self._lower_bound = bundle_lower_bound
@@ -232,8 +237,10 @@ class BundleFilterProcesser:
                 _row_factory=sqlite3.Row,
             ) # type: ignore[assignment]
             # fmt: on
-            batch_gen = _batch_entries(
-                entries_to_bundle_gen, expected_bundle_size=self._bundle_blob_size
+            batch_gen = _batch_entries_with_filter(
+                entries_to_bundle_gen,
+                expected_bundle_size=self._bundle_blob_size,
+                excluded_resources=self._protected_resources,
             )
 
             cctx = zstandard.ZstdCompressor(level=cfg.BUNDLE_ZSTD_COMPRESSION_LEVEL)
