@@ -109,6 +109,7 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
     _res: set[bytes] = set()
     _resource_dir = _index_helper.image_resource_dir
     for manifest_descriptor in _index_helper.image_index.manifests:
+        _res.add(manifest_descriptor.digest.digest)
         if isinstance(manifest_descriptor, ImageManifest.Descriptor):
             _manifest = manifest_descriptor.load_metafile_from_resource_dir(
                 _resource_dir
@@ -126,7 +127,6 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
             if _sys_config_descriptor := _image_config.sys_config:
                 _res.add(_sys_config_descriptor.digest.digest)
             _res.add(_image_config.file_table.digest.digest)
-
         elif isinstance(manifest_descriptor, OTAClientPackageManifest.Descriptor):
             _manifest = manifest_descriptor.load_metafile_from_resource_dir(
                 _resource_dir
@@ -134,9 +134,6 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
             _res.add(_manifest.config.digest.digest)
             for _payload in _manifest.layers:
                 _res.add(_payload.digest.digest)
-
-        else:  # resource_table
-            _res.add(manifest_descriptor.digest.digest)
     return _res
 
 
