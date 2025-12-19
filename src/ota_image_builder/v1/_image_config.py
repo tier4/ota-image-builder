@@ -16,10 +16,8 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
-import yaml
 from ota_image_libs.common import AliasEnabledModel
 from ota_image_libs.v1.annotation_keys import (
     OS,
@@ -48,24 +46,6 @@ class AddImageConfigAnnotations(AliasEnabledModel):
     architecture: str = Field(alias=PLATFORM_ECU_ARCH)
     os: str | None = Field(alias=OS, default=None)
     os_version: str | None = Field(alias=OS_VERSION, default=None)
-
-
-def add_sys_config(sys_cfg_fpath: Path, resource_dir: Path) -> SysConfig.Descriptor:
-    try:
-        _raw = yaml.safe_load(sys_cfg_fpath.read_text())
-        SysConfig.model_validate(_raw)
-    except Exception as e:
-        raise ValueError(f"invalid sys_config file {sys_cfg_fpath}") from e
-    return SysConfig.Descriptor.add_file_to_resource_dir(sys_cfg_fpath, resource_dir)
-
-
-def add_file_table(
-    file_table_fpath: Path, resource_dir: Path
-) -> ZstdCompressedFileTableDescriptor:
-    return ZstdCompressedFileTableDescriptor.add_file_to_resource_dir(
-        file_table_fpath, resource_dir, remove_origin=True
-    )
-
 
 def compose_image_config(
     *,
