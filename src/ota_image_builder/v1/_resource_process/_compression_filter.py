@@ -63,7 +63,9 @@ class CompressionFilterProcesser:
         read_size: int = cfg.READ_SIZE,
         worker_threads: int = cfg.COMPRESSION_RESOURCE_SCAN_WORKER_THREADS,
         concurrent_jobs: int = cfg.COMPRESSION_MAX_CONCURRENT,
+        protected_resources: set[bytes],
     ) -> None:
+        self._protected_resources = protected_resources
         self._read_size = read_size
         self._resource_dir = resource_dir
         self._db_helper = ResourceTableDBHelper(rst_dbf)
@@ -157,6 +159,9 @@ class CompressionFilterProcesser:
                 for _raw_row in rs_orm.orm_select_entries(
                     _stmt=_stmt, _row_factory=sqlite3.Row
                 ):
+                    if _raw_row[1] in self._protected_resources:
+                        continue
+
                     origin_size += _raw_row[-1]
                     submit_with_se(
                         self._process_one_entry_at_thread,
