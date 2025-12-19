@@ -150,7 +150,9 @@ def finalize_cmd(args: Namespace) -> None:
     logger.info(f"Finalize and optimize OTA image at {image_root} ...")
     logger.info("Optimizing the blob storage of the OTA image ...")
     protected_resources = _collect_protected_resources_digest(index_helper)
-    logger.debug(f"Skip the protected resources: {protected_resources}")
+    logger.debug(
+        f"Skip the protected resources: {[d.hex() for d in protected_resources]}"
+    )
 
     resource_dir = index_helper.image_resource_dir
     _old_rstable_descriptor = index_helper.image_index.image_resource_table
