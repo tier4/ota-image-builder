@@ -1,17 +1,18 @@
 [build-system]
 build-backend = "hatchling.build"
 requires = [
+    "hatch-vcs",
     "hatchling>=1.20",
 ]
 
 [project]
 name = "ota-image-builder"
 description = "OTA Image Builder."
-dynamic = ["optional-dependencies"]
-version = "0.8.1"
-# unfortunately, up to 20250909, dependabot has a bug
-#   that prevents it from working when readme is specified.
-# readme = "README.md"
+dynamic = [
+    "optional-dependencies",
+    "version",
+]
+readme = "README.md"
 license = "Apache-2.0"
 license-files = [
     "LICENSE",
@@ -54,8 +55,14 @@ dev = [
     "ruff",
 ]
 
+[tool.hatch.version]
+source = "vcs"
+
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/ota_image_builder/_version.py"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
