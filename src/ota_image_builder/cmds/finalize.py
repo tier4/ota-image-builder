@@ -91,64 +91,51 @@ def finalize_cmd_args(
     finalize_cmd_args.set_defaults(handler=finalize_cmd)
 
 
-def _collect_protected_resources_from_image_manifest(
-    _manifest: ImageManifest,
-    resource_dir: Path,
-) -> set[bytes]:
-    _res: set[bytes] = set()
-    for _file_table_descriptor in _manifest.layers:
-        _res.add(_file_table_descriptor.digest.digest)
-
-    _image_config_descriptor = _manifest.config
-    _res.add(_image_config_descriptor.digest.digest)
-    _image_config = _image_config_descriptor.load_metafile_from_resource_dir(
-        resource_dir
-    )
-    if _sys_config_descriptor := _image_config.sys_config:
-        _res.add(_sys_config_descriptor.digest.digest)
-    _res.add(_image_config.file_table.digest.digest)
-    return _res
-
-
-def _collect_protected_resources_from_otaclient_manifest(
-    _manifest: OTAClientPackageManifest,
-) -> set[bytes]:
-    _res: set[bytes] = set()
-    _res.add(_manifest.config.digest.digest)
-    for _payload in _manifest.layers:
-        _res.add(_payload.digest.digest)
-    return _res
-
-
 def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[bytes]:
-    """Scan through OTA image, collect blob digests that don't belong to any image payload.
+    """Scan through OTA image, collect blob digests that don't belong to any system image.
 
     When optimizing the blob storage, we MUST skip processing these digests.
     The blobs that don't belong any  image payload:
-    1. sys_config.
-    2. otaclient release packages.
+    1. image_payload: sys_config and file_table files.
+    2. otaclient_release: manifest.json and release packages.
     3. resource_table itself.
 
-    NOTE(20251219): an example edge case is sys_config, there is chance that system image
-                    build(dev build) will contain the pilot-auto source code within the image.
+    NOTE(20251219): an example case is when the system image is dev build, and contains
+                    the pilot-auto source code within the built system image.
+                    This will result in blob of sys_config file is also part of the system image,
+                    thus being processed during blob storage optimization, and the original blob
+                    being removed.
     """
     _res: set[bytes] = set()
     _resource_dir = _index_helper.image_resource_dir
     for manifest_descriptor in _index_helper.image_index.manifests:
         if isinstance(manifest_descriptor, ImageManifest.Descriptor):
-            _res.update(
-                _collect_protected_resources_from_image_manifest(
-                    manifest_descriptor.load_metafile_from_resource_dir(_resource_dir),
-                    resource_dir=_resource_dir,
-                )
+            _manifest = manifest_descriptor.load_metafile_from_resource_dir(
+                _resource_dir
             )
+
+            for _file_table_descriptor in _manifest.layers:
+                _res.add(_file_table_descriptor.digest.digest)
+
+            _image_config_descriptor = _manifest.config
+            _res.add(_image_config_descriptor.digest.digest)
+
+            _image_config = _image_config_descriptor.load_metafile_from_resource_dir(
+                _resource_dir
+            )
+            if _sys_config_descriptor := _image_config.sys_config:
+                _res.add(_sys_config_descriptor.digest.digest)
+            _res.add(_image_config.file_table.digest.digest)
+
         elif isinstance(manifest_descriptor, OTAClientPackageManifest.Descriptor):
-            _res.update(
-                _collect_protected_resources_from_otaclient_manifest(
-                    manifest_descriptor.load_metafile_from_resource_dir(_resource_dir)
-                )
+            _manifest = manifest_descriptor.load_metafile_from_resource_dir(
+                _resource_dir
             )
-        else:
+            _res.add(_manifest.config.digest.digest)
+            for _payload in _manifest.layers:
+                _res.add(_payload.digest.digest)
+
+        else:  # resource_table
             _res.add(manifest_descriptor.digest.digest)
     return _res
 
@@ -163,7 +150,7 @@ def finalize_cmd(args: Namespace) -> None:
     logger.info(f"Finalize and optimize OTA image at {image_root} ...")
     logger.info("Optimizing the blob storage of the OTA image ...")
     protected_resources = _collect_protected_resources_digest(index_helper)
-    logger.debug(f"protected resources: {protected_resources}")
+    logger.debug(f"Skip the protected resources: {protected_resources}")
 
     resource_dir = index_helper.image_resource_dir
     _old_rstable_descriptor = index_helper.image_index.image_resource_table
