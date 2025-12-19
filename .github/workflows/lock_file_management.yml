@@ -1,5 +1,4 @@
-name: Dependency Management CI
-# NOTE: requirements.txt serves as a single-way export from uv.lock for snyk
+name: Sync uv.lock on pyproject.toml and exporting requirements.txt.
 
 permissions:
   contents: read
@@ -25,7 +24,7 @@ jobs:
     timeout-minutes: 1
 
     steps:
-      - name: checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.ref }}
@@ -41,24 +40,23 @@ jobs:
         with:
           python-version-file: ".python-version"
 
-      - name: update lock files with latest pyproject.toml
-        run: |
-          uv lock
+      - name: Update lock files with latest pyproject.toml
+        run: uv lock
 
-      - name: export requirements.txt
+      - name: Export requirements.txt
         run: |
           uv export --frozen --no-dev --no-editable --no-hashes --no-emit-project > requirements.txt
 
-      - name: commit change if needed
+      - name: Commit change if needed
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]+sync-lockfile"
+          git config --global user.email "github-actions[bot]+sync-lockfile@users.noreply.github.com"
 
           if git diff --exit-code uv.lock requirements.txt; then
             echo "skip commit as there is no change"
           else
             echo "uv.lock and/or requirements.txt are updated, commit change ..."
             git add uv.lock requirements.txt
-            git commit -m "[GHA] update uv.lock and requirements.txt"
+            git commit -m "[GHA] update uv.lock and/or requirements.txt"
             git push
           fi
