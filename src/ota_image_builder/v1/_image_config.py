@@ -47,6 +47,7 @@ class AddImageConfigAnnotations(AliasEnabledModel):
     os: str | None = Field(alias=OS, default=None)
     os_version: str | None = Field(alias=OS_VERSION, default=None)
 
+
 def compose_image_config(
     *,
     file_table_descriptor: ZstdCompressedFileTableDescriptor,
