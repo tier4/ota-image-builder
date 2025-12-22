@@ -10,7 +10,7 @@ FROM ${SYS_IMG} AS sys_img
 
 FROM ${UBUNTU_BASE} AS app_builder
 
-COPY . /build
+COPY . /project
 
 ARG UV_VERSION
 
