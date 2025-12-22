@@ -6,11 +6,17 @@ FROM ${BUILD_BASE} AS app_build
 
 ARG PYINSTALLER_VER=6.16.0
 
-COPY . /build
+RUN mkdir /build
+# minimum required files for building app
+COPY ./src /build/src
+COPY ./pyproject.toml ./uv.lock ./README.md /build/
+
 COPY --from=ghcr.io/astral-sh/uv:0.9.4 /uv /uvx /bin/
 
 WORKDIR /build
-RUN set -eux; \
+# NOTE: mount .git for hatch-vcs to determine the version
+RUN --mount=type=bind,source=./.git,target=/build/.git,ro \
+    set -eux; \
     apt-get update -qq; \
     apt-get install -y -qq --no-install-recommends \
         git python3 python3-setuptools; \
