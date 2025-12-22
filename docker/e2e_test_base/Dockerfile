@@ -10,9 +10,7 @@ FROM ${SYS_IMG} AS sys_img
 
 FROM ${UBUNTU_BASE} AS app_builder
 
-# copy minimum required files for build
-COPY ./pyproject.toml ./.python-version ./uv.lock /project/
-COPY ./src /project/src
+COPY . /build
 
 ARG UV_VERSION
 
