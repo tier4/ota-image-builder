@@ -95,7 +95,7 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
     """Scan through OTA image, collect blob digests that don't belong to any system image.
 
     When optimizing the blob storage, we MUST skip processing these digests.
-    The blobs that don't belong any  image payload:
+    The blobs that don't belong any image payload:
     1. image_payload: sys_config and file_table files.
     2. otaclient_release: manifest.json and release packages.
     3. resource_table itself.
