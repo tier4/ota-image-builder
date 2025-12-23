@@ -119,7 +119,9 @@ class SliceFilterProcesser:
         worker_threads: int = cfg.WORKER_THREADS,
         concurrent_tasks: int = cfg.SLICE_CONCURRENT_TASKS,
         db_update_batch_size: int = cfg.SLICE_UPDATE_BATCH_SIZE,
+        protected_resources: set[bytes],
     ) -> None:
+        self._protected_resources = protected_resources
         self._update_batch = db_update_batch_size
         self._worker_threads = worker_threads
         self._se = Semaphore(concurrent_tasks)
@@ -214,6 +216,9 @@ class SliceFilterProcesser:
                     _row_factory=sqlite3.Row,
                 ):
                     resource_id, entry_digest, entry_size = _row
+                    if entry_digest in self._protected_resources:
+                        continue
+
                     sliced_count += 1
                     sliced_size += entry_size
 

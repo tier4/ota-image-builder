@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 
 from ota_image_libs.common import tmp_fname
 from ota_image_libs.v1.image_index.utils import ImageIndexHelper
+from ota_image_libs.v1.image_manifest.schema import ImageManifest
+from ota_image_libs.v1.otaclient_package.schema import OTAClientPackageManifest
 from ota_image_libs.v1.resource_table.schema import (
     ZstdCompressedResourceTableDescriptor,
 )
@@ -89,6 +91,52 @@ def finalize_cmd_args(
     finalize_cmd_args.set_defaults(handler=finalize_cmd)
 
 
+def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[bytes]:
+    """Scan through OTA image, collect blob digests that don't belong to any system image.
+
+    When optimizing the blob storage, we MUST skip processing these digests.
+    The blobs that don't belong any image payload:
+    1. image_payload: sys_config and file_table files.
+    2. otaclient_release: manifest.json and release packages.
+    3. resource_table itself.
+
+    NOTE(20251219): an example case is when the system image is dev build, and contains
+                    the pilot-auto source code within the built system image.
+                    This will result in blob of sys_config file is also part of the system image,
+                    thus being processed during blob storage optimization, and the original blob
+                    being removed.
+    """
+    _res: set[bytes] = set()
+    _resource_dir = _index_helper.image_resource_dir
+    for manifest_descriptor in _index_helper.image_index.manifests:
+        _res.add(manifest_descriptor.digest.digest)
+        if isinstance(manifest_descriptor, ImageManifest.Descriptor):
+            _manifest = manifest_descriptor.load_metafile_from_resource_dir(
+                _resource_dir
+            )
+
+            for _file_table_descriptor in _manifest.layers:
+                _res.add(_file_table_descriptor.digest.digest)
+
+            _image_config_descriptor = _manifest.config
+            _res.add(_image_config_descriptor.digest.digest)
+
+            _image_config = _image_config_descriptor.load_metafile_from_resource_dir(
+                _resource_dir
+            )
+            if _sys_config_descriptor := _image_config.sys_config:
+                _res.add(_sys_config_descriptor.digest.digest)
+            _res.add(_image_config.file_table.digest.digest)
+        elif isinstance(manifest_descriptor, OTAClientPackageManifest.Descriptor):
+            _manifest = manifest_descriptor.load_metafile_from_resource_dir(
+                _resource_dir
+            )
+            _res.add(_manifest.config.digest.digest)
+            for _payload in _manifest.layers:
+                _res.add(_payload.digest.digest)
+    return _res
+
+
 def finalize_cmd(args: Namespace) -> None:
     logger.debug(f"calling {finalize_cmd.__name__} with {args}")
     image_root = Path(args.image_root)
@@ -98,6 +146,10 @@ def finalize_cmd(args: Namespace) -> None:
     index_helper = ImageIndexHelper(image_root)
     logger.info(f"Finalize and optimize OTA image at {image_root} ...")
     logger.info("Optimizing the blob storage of the OTA image ...")
+    protected_resources = _collect_protected_resources_digest(index_helper)
+    logger.debug(
+        f"Skip the protected resources: {[d.hex() for d in protected_resources]}"
+    )
 
     resource_dir = index_helper.image_resource_dir
     _old_rstable_descriptor = index_helper.image_index.image_resource_table
@@ -123,7 +175,9 @@ def finalize_cmd(args: Namespace) -> None:
         if not args.o_skip_bundle:
             logger.info("Apply bundle filter to the blob storage ...")
             BundleFilterProcesser(
-                resource_dir=resource_dir, rst_dbf=_working_rstable
+                resource_dir=resource_dir,
+                rst_dbf=_working_rstable,
+                protected_resources=protected_resources,
             ).process()
             logger.info(
                 f"Finish applying bundle filter: time cost: {int(time.time() - start_time)}s"
@@ -135,7 +189,9 @@ def finalize_cmd(args: Namespace) -> None:
             logger.info("Apply compression filter to the blob storage ...")
             _start_time = time.time()
             CompressionFilterProcesser(
-                resource_dir=resource_dir, rst_dbf=_working_rstable
+                resource_dir=resource_dir,
+                rst_dbf=_working_rstable,
+                protected_resources=protected_resources,
             ).process()
             logger.info(
                 f"Finish applying compression filter: time cost: {int(time.time() - _start_time)}s"
@@ -149,7 +205,9 @@ def finalize_cmd(args: Namespace) -> None:
             logger.info("Apply slice filter to the blob storage ...")
             _start_time = time.time()
             SliceFilterProcesser(
-                resource_dir=resource_dir, rst_dbf=_working_rstable
+                resource_dir=resource_dir,
+                rst_dbf=_working_rstable,
+                protected_resources=protected_resources,
             ).process()
             logger.info(
                 f"Finish applying slice filter: time cost: {int(time.time() - _start_time)}s"
