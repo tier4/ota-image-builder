@@ -72,6 +72,10 @@ def _load_extra_patterns_from_file(_f: str) -> list[str]:
 
     _res = []
     for _line in _pattern_f.read_text().splitlines():
+        _line = _line.strip()
+        if _line.startswith(("#", "//")) or not _line:
+            continue  # skip empty line or commented out lines
+
         for _pa in BACKWARD_COMPAT_PA:
             if _pa.match(_line):
                 break
@@ -110,6 +114,9 @@ class RootfsImagePreparer:
             self._delete_one_entry(path)
 
         for entry in self._extra_ignore_patterns:
+            if not (entry := entry.strip()):
+                continue  # skip empty lines!
+
             if entry.startswith("/"):
                 entry = entry.lstrip("/")
                 if not GLOB_SPECIAL_CHARS.search(entry):  # for exact matching
@@ -125,7 +132,7 @@ class RootfsImagePreparer:
     def _prepare_image(self) -> None:
         for entry in DEFAULT_IGNORE_DIRS_SHOULD_PRESERVED:
             entry_path = self._rootfs_dir / entry.lstrip("/")
-            entry_path.mkdir(exist_ok=True)
+            entry_path.mkdir(exist_ok=True, parents=True)
 
     def prepare(self) -> None:
         """Prepare the system rootfs image."""
