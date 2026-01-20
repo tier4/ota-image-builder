@@ -243,7 +243,11 @@ class BundleFilterProcesser:
                 excluded_resources=self._protected_resources,
             )
 
-            cctx = zstandard.ZstdCompressor(level=cfg.BUNDLE_ZSTD_COMPRESSION_LEVEL)
+            cctx = zstandard.ZstdCompressor(
+                level=cfg.BUNDLE_ZSTD_COMPRESSION_LEVEL,
+                write_checksum=True,
+                write_content_size=True,
+            )
             compressed_bundle_size = 0
             bundle_blobs_count = 0
             total_bundled_f_count = 0
