@@ -17,7 +17,7 @@
 class ImageBuilderConfig:
     READ_SIZE = 8 * 1024**2  # 8 MiB
     WORKER_THREADS = 6
-    DB_ZSTD_COMPRESSION_LEVEL = 12
+    DB_ZSTD_COMPRESSION_LEVEL = 16
 
     INIT_PROCESS_MAX_CONCURRENT_TASKS = 256
     INIT_PROCESS_BATCH_WRITE_SIZE = 1024
@@ -27,12 +27,12 @@ class ImageBuilderConfig:
     BUNDLE_LOWER_THRESHOULD = 64  # bytes
     BUNDLE_UPPER_THRESHOULD = 8192  # 8KiB
     # each bundle's size(uncompressed)
-    BUNDLE_SIZE = 64 * 1024**2  # 64MiB
+    BUNDLE_SIZE = 32 * 1024**2  # 32MiB
     # the upper bound of sum of all compressed bundles.
     #   take compression ratio of 6(15% of original size),
-    #   we might have around 6~8 bundles.
+    #   we might have around 12~16 bundles.
     BUNDLES_COMPRESSED_MAXIMUM_SUM = 64 * 1024**2  # 64MiB
-    BUNDLE_ZSTD_COMPRESSION_LEVEL = 12
+    BUNDLE_ZSTD_COMPRESSION_LEVEL = 16
 
     COMPRESSION_LOWER_THRESHOLD = 1024  # bytes
     COMPRESSION_MIN_RATIO = 1.25
