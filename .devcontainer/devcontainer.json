@@ -8,7 +8,7 @@
         // for running tests with docker inside devcontainer
         "ghcr.io/devcontainers/features/docker-in-docker:2": { },
         "ghcr.io/devcontainers/features/git:1": { },
-        "ghcr.io/devcontainers/features/python:1": { "version": "3.13", "toolsToInstall": "uv,ruff" }
+        "ghcr.io/devcontainers/features/python:1": { "version": "3.13", "toolsToInstall": "uv,ruff", "enableShared": true }
 
     },
 
