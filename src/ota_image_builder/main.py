@@ -18,7 +18,6 @@ import argparse
 import functools
 import logging
 from collections.abc import Callable
-from multiprocessing import freeze_support
 from typing import TYPE_CHECKING
 
 from ota_image_libs import version as ota_image_libs_version
@@ -36,7 +35,6 @@ from ota_image_builder.cmds import (
     sign_cmd_args,
 )
 
-from ._common import configure_logging
 from ._version import version
 
 if TYPE_CHECKING:
@@ -47,9 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    freeze_support()
-    configure_logging()
-
+    logger.info(f"OTA image builder, version {version}")
     arg_parser = argparse.ArgumentParser(
         description="OTA Image Builder CLI for OTA Image version 1",
     )
@@ -117,7 +113,3 @@ def main():
     # ------ execute command ------ #
     handler: Callable = args.handler
     handler(args)
-
-
-if __name__ == "__main__":
-    main()
