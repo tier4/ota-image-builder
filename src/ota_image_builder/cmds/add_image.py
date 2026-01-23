@@ -41,6 +41,7 @@ from ota_image_builder._common import (
     check_if_valid_ota_image,
     exit_with_err_msg,
     get_bsp_ver_info,
+    human_readable_size,
 )
 from ota_image_builder._configs import cfg
 from ota_image_builder.cmds._utils import validate_annotations
@@ -219,6 +220,10 @@ def _process_rootfs_image(
         zstd_compression_level=cfg.DB_ZSTD_COMPRESSION_LEVEL,
     )
 
+    logger.info(
+        f"Add file_table for this image to OTA image: {_ft_db_descriptor},\n"
+        f"file_table size: {human_readable_size(_ft_db_descriptor.size)}"
+    )
     logger.info(
         f"Image is added into the OTA image: time cost {int(time.time()) - start_time}s"
     )

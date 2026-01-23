@@ -85,7 +85,11 @@ class CompressionFilterProcesser:
 
     def _thread_worker_initializer(self) -> None:
         thread_local = self._worker_thread_local
-        thread_local.cctx = zstandard.ZstdCompressor(level=self._zstd_compression_level)
+        thread_local.cctx = zstandard.ZstdCompressor(
+            level=self._zstd_compression_level,
+            write_checksum=True,
+            write_content_size=True,
+        )
 
     # ------ worker thread workload ------ #
 

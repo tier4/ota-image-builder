@@ -32,6 +32,7 @@ from ota_image_builder._common import (
     check_if_valid_ota_image,
     count_blobs_in_dir,
     exit_with_err_msg,
+    human_readable_size,
 )
 from ota_image_builder._configs import cfg
 from ota_image_builder.v1._resource_process._bundle_filter import BundleFilterProcesser
@@ -231,7 +232,10 @@ def finalize_cmd(args: Namespace) -> None:
                 zstd_compression_level=cfg.DB_ZSTD_COMPRESSION_LEVEL,
             )
         )
-        logger.debug(f"Updated resource_table: {_new_rstable_descriptor}")
+        logger.info(
+            f"Updated resource_table: {_new_rstable_descriptor},\n"
+            f"resource_table size: {human_readable_size(_new_rstable_descriptor.size)}"
+        )
         logger.debug(f"Remove the old resource_table's blob: {_old_rstable_descriptor}")
         _old_rstable_descriptor.remove_blob_from_resource_dir(resource_dir)
         index_helper.image_index.update_resource_table(_new_rstable_descriptor)

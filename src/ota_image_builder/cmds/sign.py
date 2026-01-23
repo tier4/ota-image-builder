@@ -289,7 +289,10 @@ def sign_cmd(args: Namespace) -> None:
         )
 
     sign_cert = loaded_cert_chain.ee
-    print(
-        "OTA Image is signed successfully!\n"
-        f"{sign_cert.subject=}\n{sign_cert.not_valid_before_utc=}\n{sign_cert.not_valid_after_utc=}"
+    logger.info(
+        (
+            "OTA image is signed successfully with the following cert:\n"
+            f"{sign_cert.issuer=}\n{sign_cert.subject=}\n{sign_cert.not_valid_before_utc=}\n{sign_cert.not_valid_after_utc=}"
+        )
     )
+    print("OTA image is signed successfully!")
