@@ -26,14 +26,14 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "ota-image-libs@https://github.com/tier4/ota-image-libs/releases/download/v0.2.6/ota_image_libs-0.2.6-py3-none-any.whl#sha256:ecbe997a5aa08c2e001ce69e9e9837fc6906f75543a1b88a09d7775894d2ac4b",
+    "ota-image-libs@https://github.com/tier4/ota-image-libs/releases/download/v0.3.0/ota_image_libs-0.3.0-py3-none-any.whl#sha256:98a411c53a01f313ddfbfcb8c8d20dcd9ced829c7282a01763c81f25c695d79c",
     # via ota-image-libs, unfortunately github cannot see through indirect deps
     #   introduced via dep specified by wheel package.
     # based on ota-image-libs deps, add more restrictions to version range.
     "cryptography>=45.0.1,<47",
-    "msgpack~=1.1",
+    "msgpack>=1.1,<2",
     "pydantic>=2.10,<3",
-    "pyjwt~=2.9",
+    "pyjwt>=2.9,<2.11",
     "pyyaml==6.0.3",
     "simple-sqlite3-orm~=0.12",
     "typing-extensions>=4.6.3",
