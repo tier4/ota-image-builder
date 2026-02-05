@@ -126,3 +126,19 @@ ignore = [
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+pythonpath = ["src"]
+addopts = ["-v", "--tb=short"]
+
+[tool.coverage.run]
+source = ["src/ota_image_builder"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]

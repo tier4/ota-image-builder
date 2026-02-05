@@ -1,0 +1,93 @@
+name: Unit Test CI
+
+permissions:
+  contents: read
+  packages: read
+  actions: read
+  pull-requests: write
+
+on:
+  pull_request:
+    branches:
+      - main
+      - v*
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - review_requested
+      - assigned
+  push:
+    branches:
+      - main
+      - v*
+    paths:
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/unit_test.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@4db96194c378173c656ce18a155ffc14a9fc4355 # v5
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run ruff check
+        run: uv run ruff check .
+
+      - name: Run ruff format check
+        run: uv run ruff format --check .
+
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13"]
+    steps:
+      - name: Checkout commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0 # sonarcloud needs full git histories
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@4db96194c378173c656ce18a155ffc14a9fc4355 # v5
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run pytest with coverage
+        run: |
+          mkdir -p test_result
+          uv run coverage run -m pytest --junit-xml=test_result/pytest.xml
+          uv run coverage xml -o test_result/coverage.xml
+
+      - name: Generate coverage report
+        run: uv run coverage report -m
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
