@@ -17,6 +17,10 @@ ${BUILDER} -d init \
     --annotations-file ${DATA}/full_annotations.yaml \
     ${OTA_IMAGE_DIR}
 
+echo -e "\n------------ prepare the input system image ------------"
+${BUILDER} -d prepare-sysimg \
+    --rootfs-dir ${SYS_IMG_ROOTFS}
+
 echo -e "\n------------ add image payload(dev) into OTA image ------------"
 ${BUILDER} -d add-image \
     --annotations-file ${DATA}/full_annotations.yaml \
