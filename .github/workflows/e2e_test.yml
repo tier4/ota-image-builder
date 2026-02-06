@@ -26,15 +26,19 @@ jobs:
     steps:
       - name: Checkout commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: Build test base container image
+      - name: Prepare test system image rootfs
         run: |
-          docker build -f docker/e2e_test_base/Dockerfile -t ota_image_builder_test .
-      - name: E2E test
-        run: |
-          docker run --rm \
-            -v `pwd`/docker/e2e_test_base/e2e_test.sh:/entry_point.sh:ro \
-            -v `pwd`/tests/certs/gen_cert_chain.sh:/certs/gen_cert_chain.sh:ro \
-            -v `pwd`/tests/data:/workdir:ro \
-            -w /workdir \
-            --entrypoint=/bin/bash \
-            ota_image_builder_test /entry_point.sh
+          mkdir -p .sys_img_for_test
+          ./tests/scripts/e2e_build_sys_img.sh .sys_img_for_test
+      # - name: Build test base container image
+      #   run: |
+      #     docker build -f docker/e2e_test_base/Dockerfile -t ota_image_builder_test .
+      # - name: E2E test
+      #   run: |
+      #     docker run --rm \
+      #       -v `pwd`/docker/e2e_test_base/e2e_test.sh:/entry_point.sh:ro \
+      #       -v `pwd`/tests/certs/gen_cert_chain.sh:/certs/gen_cert_chain.sh:ro \
+      #       -v `pwd`/tests/data:/workdir:ro \
+      #       -w /workdir \
+      #       --entrypoint=/bin/bash \
+      #       ota_image_builder_test /entry_point.sh
