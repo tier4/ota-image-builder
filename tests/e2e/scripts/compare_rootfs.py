@@ -42,7 +42,7 @@ class FileInfo:
     uid: int
     gid: int
     xattrs: tuple[tuple[str, bytes], ...]
-    sha256digest: Optional[bytes] = None
+    sha256digest: Optional[str] = None
     symlinktarget: Optional[str] = None
 
 
@@ -61,7 +61,7 @@ def get_file_info(path: Path) -> FileInfo:
         with open(path, "rb") as _src:
             while chunk := _src.read(READ_SIZE):
                 _hasher.update(chunk)
-        sha256digest = _hasher.digest()
+        sha256digest = _hasher.hexdigest()
 
     symlink_target = None
     if stat.S_ISLNK(st_mode):
@@ -78,17 +78,25 @@ def get_file_info(path: Path) -> FileInfo:
     )
 
 
-def compare_path(_relative: Path, left_root: Path, right_root: Path) -> int:
+def compare_path(_relative: Path, left_root: Path, right_root: Path) -> bool:
     """Compare two files and print differences. Returns count of differences."""
-    diff_count = 0
+    has_diff = False
 
+    # NOTE: left side must be there
     left_info = get_file_info(left_root / _relative)
-    right_info = get_file_info(right_root / _relative)
+
+    try:
+        right_info = get_file_info(right_root / _relative)
+    except FileNotFoundError:
+        print(f"{_relative=}: right side not found!")
+        return True
+
     for _fn in file_info_fields:
         _left_v, _right_v = getattr(left_info, _fn), getattr(right_info, _fn)
         if _left_v != _right_v:
-            print(f"Found diff for {_fn}: {_left_v} != {_right_v}")
-    return diff_count
+            print(f"{_relative=}: diff on {_fn}: {_left_v} != {_right_v}")
+            has_diff = True
+    return has_diff
 
 
 def compare_rootfs(left_rootfs: Path, right_rootfs: Path) -> int:
