@@ -55,7 +55,7 @@ jobs:
           sudo ./tests/e2e/scripts/e2e_build_sys_img.sh ${SYS_IMG_ROOTFS}
       - name: Build OTA image from the input test system image
         run: |
-          DATA=./tests/data sudo ./tests/e2e/scripts/e2e_build_ota_image.sh \
+          DATA=./tests/data sudo -E ./tests/e2e/scripts/e2e_build_ota_image.sh \
             ./dist/ota-image-builder \
             ${SYS_IMG_ROOTFS} \
             ${OTA_IMAGE_OUTPUT} ${OTA_IMAGE_ARTIFACT}
