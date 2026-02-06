@@ -60,7 +60,7 @@ jobs:
             ${SYS_IMG_ROOTFS} \
             ${OTA_IMAGE_OUTPUT} ${OTA_IMAGE_ARTIFACT}
           # NOTE: ota-image-tools deploy-image works with OTA image artifact
-          rm -rf ${OTA_IMAGE_OUTPUT}
+          sudo rm -rf ${OTA_IMAGE_OUTPUT}
       - name: Deploy OTA image
         run: |
           sudo ./dist/ota-image-tools deploy-image \
