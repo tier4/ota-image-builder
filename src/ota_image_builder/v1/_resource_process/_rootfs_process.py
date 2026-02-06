@@ -141,7 +141,7 @@ class SystemImageProcesser:
             FileTableInode(
                 inode_id=_inode_in_db,
                 uid=f_stat.st_uid,
-                gid=f_stat.st_uid,
+                gid=f_stat.st_gid,
                 mode=f_stat.st_mode,
                 xattrs=xattrs or None,
             )
