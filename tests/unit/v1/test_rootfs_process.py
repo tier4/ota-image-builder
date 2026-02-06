@@ -18,8 +18,11 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 from queue import Queue
-from unittest.mock import patch
 
+from ota_image_libs.v1.file_table.schema import FileTableInode
+
+import ota_image_builder.v1._resource_process._rootfs_process as rp_module
+from ota_image_builder._configs import cfg
 from ota_image_builder._consts import EMPTY_FILE_SHA256_BYTE
 from ota_image_builder.v1._resource_process._rootfs_process import (
     EMPTY_FILE_RS_ID,
@@ -79,8 +82,6 @@ class TestResourceRegister:
 
     def test_thread_safety(self):
         """Test that registration is thread-safe."""
-        import threading
-
         register = ResourceRegister()
         results = []
 
@@ -106,34 +107,30 @@ class TestResourceRegister:
 class TestGlobalShutdownOnFailed:
     """Tests for _global_shutdown_on_failed function."""
 
-    def test_sets_global_interrupted_and_interrupts_main(self):
+    def test_sets_global_interrupted_and_interrupts_main(self, mocker):
         """Test that the function sets global flag and interrupts main thread."""
-        import ota_image_builder.v1._resource_process._rootfs_process as rp_module
-
         # Reset global state
         rp_module._global_interrupted = False
 
-        with patch.object(rp_module, "_thread") as mock_thread:
-            _global_shutdown_on_failed(Exception("test error"))
+        mock_thread = mocker.patch.object(rp_module, "_thread")
+        _global_shutdown_on_failed(Exception("test error"))
 
-            assert rp_module._global_interrupted is True
-            mock_thread.interrupt_main.assert_called_once()
+        assert rp_module._global_interrupted is True
+        mock_thread.interrupt_main.assert_called_once()
 
         # Reset for other tests
         rp_module._global_interrupted = False
 
-    def test_only_interrupts_once(self):
+    def test_only_interrupts_once(self, mocker):
         """Test that interrupt_main is only called once."""
-        import ota_image_builder.v1._resource_process._rootfs_process as rp_module
-
         # Set as already interrupted
         rp_module._global_interrupted = True
 
-        with patch.object(rp_module, "_thread") as mock_thread:
-            _global_shutdown_on_failed(Exception("test error"))
+        mock_thread = mocker.patch.object(rp_module, "_thread")
+        _global_shutdown_on_failed(Exception("test error"))
 
-            # Should not call interrupt_main again
-            mock_thread.interrupt_main.assert_not_called()
+        # Should not call interrupt_main again
+        mock_thread.interrupt_main.assert_not_called()
 
         # Reset for other tests
         rp_module._global_interrupted = False
@@ -201,8 +198,6 @@ class TestSystemImageProcesser:
 
     def test_default_values(self, tmp_path: Path):
         """Test default values are used when not specified."""
-        from ota_image_builder._configs import cfg
-
         que = Queue()
         src = tmp_path / "src"
         src.mkdir()
@@ -259,3 +254,168 @@ class TestSystemImageProcesser:
 
         # Should not be able to acquire anymore
         assert processor._se.acquire(blocking=False) is False
+
+    def test_process_inode_non_hardlinked_file(self, tmp_path: Path, mocker):
+        """Test _process_inode correctly records uid and gid for non-hardlinked file."""
+        que = Queue()
+        src = tmp_path / "src"
+        src.mkdir()
+        resource_dir = tmp_path / "resources"
+        resource_dir.mkdir()
+
+        test_file = src / "test_file.txt"
+        test_file.write_text("test content")
+
+        processor = SystemImageProcesser(
+            que,
+            src=src,
+            resource_dir=resource_dir,
+        )
+
+        # Mock stat to return different uid and gid values
+        mock_stat = mocker.MagicMock()
+        mock_stat.st_uid = 1000
+        mock_stat.st_gid = 2000
+        mock_stat.st_mode = 0o644
+        mock_stat.st_nlink = 1  # Non-hardlinked
+
+        mocker.patch.object(Path, "stat", return_value=mock_stat)
+        mocker.patch("os.listxattr", return_value=[])
+
+        # Process the inode
+        inode_id = processor._process_inode(test_file)
+
+        # Get the FileTableInode from queue
+        inode_entry = que.get_nowait()
+
+        assert isinstance(inode_entry, FileTableInode)
+        assert inode_entry.inode_id == inode_id
+        assert inode_entry.uid == 1000
+        assert inode_entry.gid == 2000
+        assert inode_entry.mode == 0o644
+
+    def test_process_inode_directory(self, tmp_path: Path, mocker):
+        """Test _process_inode correctly records uid and gid for directory."""
+        que = Queue()
+        src = tmp_path / "src"
+        src.mkdir()
+        resource_dir = tmp_path / "resources"
+        resource_dir.mkdir()
+
+        test_dir = src / "test_dir"
+        test_dir.mkdir()
+
+        processor = SystemImageProcesser(
+            que,
+            src=src,
+            resource_dir=resource_dir,
+        )
+
+        # Mock stat to return different uid and gid values
+        # Directory has st_nlink >= 2 but is_dir() returns True, so it goes through non-hardlinked path
+        mock_stat = mocker.MagicMock()
+        mock_stat.st_uid = 1001
+        mock_stat.st_gid = 2001
+        mock_stat.st_mode = 0o755
+        mock_stat.st_nlink = 3  # Directories typically have nlink >= 2
+
+        mocker.patch.object(Path, "stat", return_value=mock_stat)
+        mocker.patch.object(Path, "is_symlink", return_value=False)
+        mocker.patch.object(Path, "is_dir", return_value=True)
+        mocker.patch("os.listxattr", return_value=[])
+
+        # Process the inode
+        inode_id = processor._process_inode(test_dir)
+
+        # Get the FileTableInode from queue
+        inode_entry = que.get_nowait()
+
+        assert isinstance(inode_entry, FileTableInode)
+        assert inode_entry.inode_id == inode_id
+        assert inode_entry.uid == 1001
+        assert inode_entry.gid == 2001
+        assert inode_entry.mode == 0o755
+
+    def test_process_inode_hardlinked_file(self, tmp_path: Path, mocker):
+        """Test _process_inode correctly records uid and gid for hardlinked file."""
+        que = Queue()
+        src = tmp_path / "src"
+        src.mkdir()
+        resource_dir = tmp_path / "resources"
+        resource_dir.mkdir()
+
+        test_file = src / "original.txt"
+        test_file.write_text("test content")
+
+        processor = SystemImageProcesser(
+            que,
+            src=src,
+            resource_dir=resource_dir,
+        )
+
+        # Mock stat to return hardlinked file with different uid and gid
+        mock_stat = mocker.MagicMock()
+        mock_stat.st_uid = 1002
+        mock_stat.st_gid = 2002
+        mock_stat.st_mode = 0o644
+        mock_stat.st_nlink = 3  # Hardlinked (nlink > 1)
+        mock_stat.st_ino = 12345
+
+        mocker.patch.object(Path, "stat", return_value=mock_stat)
+        mocker.patch.object(Path, "is_symlink", return_value=False)
+        mocker.patch.object(Path, "is_dir", return_value=False)
+        mocker.patch("os.listxattr", return_value=[])
+
+        # Process the inode for the hardlinked file
+        inode_id = processor._process_inode(test_file)
+
+        # Get the FileTableInode from queue
+        inode_entry = que.get_nowait()
+
+        assert isinstance(inode_entry, FileTableInode)
+        # For hardlinked files, inode_id should be -st_ino
+        assert inode_entry.inode_id == -12345
+        assert inode_id == -12345
+        assert inode_entry.uid == 1002
+        assert inode_entry.gid == 2002
+        assert inode_entry.mode == 0o644
+
+    def test_process_inode_symlink(self, tmp_path: Path, mocker):
+        """Test _process_inode correctly records uid and gid for symlink."""
+        que = Queue()
+        src = tmp_path / "src"
+        src.mkdir()
+        resource_dir = tmp_path / "resources"
+        resource_dir.mkdir()
+
+        symlink = src / "symlink.txt"
+        symlink.symlink_to("target.txt")
+
+        processor = SystemImageProcesser(
+            que,
+            src=src,
+            resource_dir=resource_dir,
+        )
+
+        # Mock stat to return different uid and gid values
+        # Symlinks have st_nlink == 1, so they go through the non-hardlinked path
+        mock_stat = mocker.MagicMock()
+        mock_stat.st_uid = 1003
+        mock_stat.st_gid = 2003
+        mock_stat.st_mode = 0o777
+        mock_stat.st_nlink = 1
+
+        mocker.patch.object(Path, "stat", return_value=mock_stat)
+        mocker.patch("os.listxattr", return_value=[])
+
+        # Process the inode
+        inode_id = processor._process_inode(symlink)
+
+        # Get the FileTableInode from queue
+        inode_entry = que.get_nowait()
+
+        assert isinstance(inode_entry, FileTableInode)
+        assert inode_entry.inode_id == inode_id
+        assert inode_entry.uid == 1003
+        assert inode_entry.gid == 2003
+        assert inode_entry.mode == 0o777
