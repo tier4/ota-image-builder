@@ -28,7 +28,6 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Prepare test system image rootfs
         run: |
-          mkdir -p .sys_img_for_test
           ./tests/scripts/e2e_build_sys_img.sh .sys_img_for_test
       # - name: Build test base container image
       #   run: |
