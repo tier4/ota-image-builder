@@ -1,8 +1,9 @@
 #!/bin/sh
+# setup a test system image
 set -eux
 
 DIND_VER=28-dind
-ROOTFS=dind_rootfs
+ROOTFS=${1}
 SETUP_SCRIPT=$(dirname "$0")/e2e_setup_sys_img.sh
 
 # ------ export the dind image contents ------ #
