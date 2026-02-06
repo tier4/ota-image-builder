@@ -13,10 +13,12 @@ docker info
 EMPTY_FILE_COUNTS=5000
 EMPTY_FILE_FOLDER=/empty_files
 
+set +x
 mkdir ${EMPTY_FILE_FOLDER}
 for i in $(seq 1 ${EMPTY_FILE_COUNTS}); do
     touch "${EMPTY_FILE_FOLDER}/file_$i.txt"
 done
+set -x
 
 # ------ xattrs support ------ #
 touch /file_with_xattrs
