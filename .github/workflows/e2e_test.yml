@@ -28,7 +28,7 @@ jobs:
       OTA_IMAGE_OUTPUT: ota_image
       OTA_IMAGE_ARTIFACT: ota_image.zip
       DEPLOYED_ROOTFS: deployed_rootfs
-      CERT_DIR: /certs
+      CERT_DIR: certs
     steps:
       - name: Checkout commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
