@@ -1,11 +1,12 @@
 #!/bin/bash
 # copied from otaclient repo
-
-# https://stackoverflow.com/questions/52500165/problem-verifying-a-self-created-openssl-root-intermediate-and-end-user-certifi
-
 set -eux
 
-CA_CHAIN_PREFIX=${1:-test}
+OUTPUT=${1}
+CA_CHAIN_PREFIX=${2:-test}
+
+mkdir -p ${OUTPUT}
+pushd ${OUTPUT}
 
 # Root CA:
 openssl ecparam -out root.key -name prime256v1 -genkey
@@ -68,3 +69,4 @@ openssl x509 -req \
     -extensions sign_cert
 
 rm -f root.key interm.key interm.csr sign.csr *.srl
+popd

@@ -4,7 +4,8 @@ set -eux
 BUILDER="$1"
 SYS_IMG_ROOTFS="$2"
 OTA_IMAGE_DIR="$3"
-CERT_DIR=${CERT_DIR:-/certs}
+OTA_IMAGE_ARTIFACT_OUTPUT="$4"
+CERT_DIR=${CERT_DIR}
 DATA=${DATA:-./tests/data}
 
 # TODO: add otaclient release package
@@ -44,5 +45,9 @@ ${BUILDER} -d sign \
     --ca-cert ${CERT_DIR}/test.interm.pem \
     ${OTA_IMAGE_DIR}
 rm -rf ${CERT_DIR}/*.key
+
+echo -e "\n------------ packe OTA image artifact ------------"
+${BUILDER} -d pack-artifact \
+    -o ${OTA_IMAGE_ARTIFACT_OUTPUT} ${OTA_IMAGE_DIR}
 
 echo -e "\n------------ OTA image build finished! ------------"
