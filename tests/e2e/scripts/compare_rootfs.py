@@ -108,6 +108,14 @@ def compare_rootfs(left_rootfs: Path, right_rootfs: Path) -> int:
     for curdir, dnames, fnames in os.walk(left_rootfs, followlinks=False):
         _relative_curdir = Path(curdir).relative_to(left_rootfs)
         for _name in chain(dnames, fnames):
+            _path = Path(curdir) / _name
+            if not (
+                _path.is_symlink()
+                or _path.is_file()
+                or _path.is_dir()
+                or _path.is_char_device()  # for the whiteout file
+            ):
+                continue
             _relative_path = _relative_curdir / _name
             left_paths.add(str(_relative_path))
             diff_count += compare_path(_relative_path, left_rootfs, right_rootfs)
