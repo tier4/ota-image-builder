@@ -28,11 +28,10 @@ set +x
 mkdir ${SMALL_FILES_FOLDER}
 for i in $(seq 1 ${SMALL_FILES_COUNT}); do
     openssl rand -hex 128 > "${SMALL_FILES_FOLDER}/file_$i.txt"
-    chown 1000:1000 
 done
+set -x
 
 chown -R 1000:42 /small_files
-set -x
 
 # ------ xattrs support ------ #
 touch /file_with_xattrs
