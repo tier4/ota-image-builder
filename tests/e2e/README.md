@@ -10,6 +10,7 @@ The E2E test validates the complete OTA image build-and-deploy cycle by:
 4. **Comparing** the rebuilt rootfs against the original to verify bit-level integrity.
 
 This end-to-end workflow ensures:
+
 - **Payload integrity**: All file contents are preserved correctly.
 - **Metadata processing**: File permissions, ownership, and xattrs are recorded into OTA image payload file_table properly.
 - **Edge case handling**: Whiteout files, empty files, special characters, and large files are processed correctly.
@@ -38,6 +39,7 @@ init → prepare-sysimg → add-image (dev) → add-image (prd) → finalize →
 ### Phase 3: Validation ([compare_rootfs.py](scripts/compare_rootfs.py))
 
 Performs deep comparison of the original vs. rebuilt rootfs:
+
 - File content (SHA256 digest).
 - File metadata (mode, uid, gid, file type).
 - Extended attributes (xattrs).

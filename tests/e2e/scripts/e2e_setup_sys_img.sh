@@ -5,7 +5,7 @@ set -eux
 apk update
 apk add attr
 
-# check if docker is running properly 
+# check if docker is running properly
 docker info
 
 # ------ empty files ------ #
