@@ -99,9 +99,9 @@ def compare_path(_relative: Path, left_root: Path, right_root: Path) -> bool:
     return has_diff
 
 
-def compare_rootfs(left_rootfs: Path, right_rootfs: Path) -> int:
+def compare_rootfs(left_rootfs: Path, right_rootfs: Path) -> tuple[int, int]:
     """Compare two rootfs directories and print differences. Returns count of differences."""
-    diff_count = 0
+    entry_count, diff_count = 0, 0
     left_paths: set[str] = set()
 
     # compare the right side from left side
@@ -116,6 +116,8 @@ def compare_rootfs(left_rootfs: Path, right_rootfs: Path) -> int:
                 or _path.is_char_device()  # for the whiteout file
             ):
                 continue
+
+            entry_count += 1
             _relative_path = _relative_curdir / _name
             left_paths.add(str(_relative_path))
             diff_count += compare_path(_relative_path, left_rootfs, right_rootfs)
@@ -128,7 +130,7 @@ def compare_rootfs(left_rootfs: Path, right_rootfs: Path) -> int:
             if _relative_path not in left_paths:
                 print(f"Found paths only presented at right side: {_relative_path}")
                 diff_count += 1
-    return diff_count
+    return entry_count, diff_count
 
 
 def main():
@@ -141,10 +143,13 @@ def main():
     right_rootfs: Path = args.right_rootfs.resolve()
 
     print(f"Comparing {left_rootfs} vs {right_rootfs}")
-    diff_count = compare_rootfs(left_rootfs, right_rootfs)
+    entry_count, diff_count = compare_rootfs(left_rootfs, right_rootfs)
     if diff_count > 0:
         exit_with_msg(f"\nFound {diff_count} difference(s).")
-    exit_with_msg("\nDirectories are identical.", 0)
+
+    exit_with_msg(
+        f"\nDirectories are identical (total entries count: {entry_count}).", 0
+    )
 
 
 if __name__ == "__main__":
