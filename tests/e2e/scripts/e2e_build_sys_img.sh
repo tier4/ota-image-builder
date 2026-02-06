@@ -16,7 +16,7 @@ cp ${SETUP_SCRIPT} ${ROOTFS}
 
 # ------ use podman to setup the exported system image ------ #
 podman run -d --replace --name setup_dind --privileged \
-    --rootfs `realpath ${ROOTFS}` /usr/local/bin/dockerd-entrypoint.sh
+    --rootfs "$(realpath ${ROOTFS})" /usr/local/bin/dockerd-entrypoint.sh
 # NOTE: wait for the dockerd fully starts up
 sleep 16
 
