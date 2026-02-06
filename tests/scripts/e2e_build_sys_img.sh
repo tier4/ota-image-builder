@@ -65,6 +65,9 @@ EOF
 )
 
 # build base image
-echo "${BASE_DOCKERFILE_CONTENTS}" | docker build -t ${BASE_IMAGE_REF} -f - /dev/null
+echo "${BASE_DOCKERFILE_CONTENTS}" | docker build -t ${BASE_IMAGE_REF} -
 # build upper image
-echo "${UPPER_DOCKERFILE_CONTENTS}" | docker build -t ${UPPER_IMAGE_REF} -f - /dev/null
+echo "${UPPER_DOCKERFILE_CONTENTS}" | docker build -t ${UPPER_IMAGE_REF} -
+
+# inspect the built images
+docker image list
