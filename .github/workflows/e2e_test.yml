@@ -46,7 +46,7 @@ jobs:
             --name ota-image-builder \
             src/ota_image_builder/__main__.py
           ./dist/ota-image-builder version
-          ln -s ./dist/ota-image-builder ./dist/ota-image-tools
+          ln -s ota-image-builder ./dist/ota-image-tools
       - name: Setup test PKI
         run: |
           ./tests/scripts/gen_cert_chain.sh ${CERT_DIR}
