@@ -67,6 +67,7 @@ jobs:
             --image ${OTA_IMAGE_ARTIFACT} \
             --rootfs-dir ${DEPLOYED_ROOTFS} \
             --ecu-id autoware --release-key dev
+          sudo rm -rf ${DEPLOYED_ROOTFS}/.ota-resources
       - name: Compare input output rootfs
         run: |
           sudo ./tests/e2e/scripts/compare_rootfs.py ${SYS_IMG_ROOTFS} ${DEPLOYED_ROOTFS}

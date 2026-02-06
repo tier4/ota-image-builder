@@ -119,7 +119,7 @@ def compare_rootfs(left_rootfs: Path, right_rootfs: Path) -> int:
             _relative_path = str(_relative_curdir / _name)
             if _relative_path not in left_paths:
                 print(f"Found paths only presented at right side: {_relative_path}")
-
+                diff_count += 1
     return diff_count
 
 

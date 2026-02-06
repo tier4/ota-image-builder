@@ -10,13 +10,24 @@ docker info
 
 # ------ empty files ------ #
 # for otaclient PR#492, add a folder that contains lots of empty files
-EMPTY_FILE_COUNTS=5000
+EMPTY_FILE_COUNT=5000
 EMPTY_FILE_FOLDER=/empty_files
 
 set +x
 mkdir ${EMPTY_FILE_FOLDER}
-for i in $(seq 1 ${EMPTY_FILE_COUNTS}); do
+for i in $(seq 1 ${EMPTY_FILE_COUNT}); do
     touch "${EMPTY_FILE_FOLDER}/file_$i.txt"
+done
+set -x
+
+# ------ small files ------ #
+SMALL_FILES_COUNT=5000
+SMALL_FILES_FOLDER=/small_files
+
+set +x
+mkdir ${SMALL_FILES_FOLDER}
+for i in $(seq 1 ${SMALL_FILES_COUNT}); do
+    openssl rand -hex 128 > "${SMALL_FILES_FOLDER}/file_$i.txt"
 done
 set -x
 
