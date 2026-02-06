@@ -71,4 +71,4 @@ jobs:
             --ecu-id autoware --release-key dev
       - name: Compare input output rootfs
         run: |
-          ./tests/e2e/scripts/compare_rootfs.py
+          ./tests/e2e/scripts/compare_rootfs.py ${SYS_IMG_ROOTFS} ${DEPLOYED_ROOTFS}
