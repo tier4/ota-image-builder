@@ -1,5 +1,5 @@
 #!/bin/sh
-setux
+set -eux
 
 BUILDER="$1"
 SYS_IMG_ROOTFS="$2"
