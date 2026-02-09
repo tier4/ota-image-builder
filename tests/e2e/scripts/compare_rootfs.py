@@ -79,7 +79,8 @@ def get_file_info(path: Path) -> FileInfo:
 
 
 def compare_path(_relative: Path, left_root: Path, right_root: Path) -> bool:
-    """Compare two files and print differences. Returns count of differences."""
+    """Compare two files and print differences.
+    Returns bool of whether the two paths have differences or not."""
     has_diff = False
 
     # NOTE: left side must be there

@@ -47,7 +47,7 @@ Validates the built OTA image against the root-of-trust, and verifies its signat
 
 Deploys the OTA image payload to a folder.
 
-### Phase 3: Validation ([compare_rootfs.py](scripts/compare_rootfs.py))
+### Phase 5: Validation ([compare_rootfs.py](scripts/compare_rootfs.py))
 
 Performs deep comparison of the original vs. deployed rootfs from phase4:
 
