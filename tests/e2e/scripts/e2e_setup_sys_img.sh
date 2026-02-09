@@ -27,7 +27,7 @@ SMALL_FILES_FOLDER=/small_files
 set +x
 mkdir ${SMALL_FILES_FOLDER}
 for i in $(seq 1 ${SMALL_FILES_COUNT}); do
-    dd if=/dev/urandom of="${SMALL_FILES_FOLDER}/file_$i.txt" bs=4k count=1
+    dd if=/dev/urandom of="${SMALL_FILES_FOLDER}/file_$i.txt" bs=4k count=1 > /dev/null 2>&1
 done
 set -x
 
