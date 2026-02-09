@@ -44,7 +44,7 @@ dd if=/dev/urandom of=/500M.img bs=1M count=500
 SPECIAL_FILE="path;adf.ae?qu.er\y=str#fragファイルement"
 echo -n "${SPECIAL_FILE}" > "/${SPECIAL_FILE}"
 
-# ------ docker image pull suport ------ #
+# ------ docker image pull support ------ #
 BUSYBOX_VER=1.37.0
 docker image pull busybox:${BUSYBOX_VER}
 

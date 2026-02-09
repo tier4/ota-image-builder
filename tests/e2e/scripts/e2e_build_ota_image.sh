@@ -50,7 +50,7 @@ ${BUILDER} -d sign \
     ${OTA_IMAGE_DIR}
 rm -rf ${CERT_DIR}/*.key
 
-echo -e "\n------------ packe OTA image artifact ------------"
+echo -e "\n------------ pack OTA image artifact ------------"
 ${BUILDER} -d pack-artifact \
     -o ${OTA_IMAGE_ARTIFACT_OUTPUT} ${OTA_IMAGE_DIR}
 
