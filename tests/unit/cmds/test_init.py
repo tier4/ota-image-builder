@@ -57,18 +57,17 @@ class TestInitCMDAnnotations:
 
     def test_populate_all_fields(self):
         """Test populating all fields."""
-        model = InitCMDAnnotations(
-            pilot_auto_platform="test-platform",
-            pilot_auto_source_repo="https://github.com/test/repo",
-            pilot_auto_version="1.0.0",
-            pilot_auto_release_commit="abc123",
-            pilot_auto_release_branch="main",
-            web_auto_project="test-project",
-            web_auto_project_id="proj-123",
-            web_auto_catalog="test-catalog",
-            web_auto_catalog_id="cat-456",
-            web_auto_env="production",
-        )
+        model = InitCMDAnnotations()
+        model.pilot_auto_platform = "test-platform"
+        model.pilot_auto_source_repo = "https://github.com/test/repo"
+        model.pilot_auto_version = "1.0.0"
+        model.pilot_auto_release_commit = "abc123"
+        model.pilot_auto_release_branch = "main"
+        model.web_auto_project = "test-project"
+        model.web_auto_project_id = "proj-123"
+        model.web_auto_catalog = "test-catalog"
+        model.web_auto_catalog_id = "cat-456"
+        model.web_auto_env = "production"
 
         assert model.pilot_auto_platform == "test-platform"
         assert model.pilot_auto_source_repo == "https://github.com/test/repo"
@@ -110,10 +109,9 @@ class TestInitCMDAnnotations:
 
     def test_partial_fields(self):
         """Test populating only some fields."""
-        model = InitCMDAnnotations(
-            pilot_auto_platform="my-platform",
-            pilot_auto_version="2.0.0",
-        )
+        model = InitCMDAnnotations()
+        model.pilot_auto_platform = "my-platform"
+        model.pilot_auto_version = "2.0.0"
 
         assert model.pilot_auto_platform == "my-platform"
         assert model.pilot_auto_version == "2.0.0"
@@ -122,9 +120,8 @@ class TestInitCMDAnnotations:
 
     def test_model_dump_uses_aliases(self):
         """Test that model_dump can output with alias names."""
-        model = InitCMDAnnotations(
-            pilot_auto_platform="test-platform",
-        )
+        model = InitCMDAnnotations()
+        model.pilot_auto_platform = "test-platform"
 
         # by_alias=True should use the annotation key names
         dumped = model.model_dump(by_alias=True, exclude_none=True)

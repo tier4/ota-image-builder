@@ -16,25 +16,65 @@ on:
       - ".github/workflows/e2e_test.yml"
       - "pyproject.toml"
       - "uv.lock"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/e2e_test.yml"
   # allow the test CI to be manually triggerred
   workflow_dispatch:
 
 jobs:
-  ota_image_build_e2e_test:
+  ota_image_e2e_test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      SYS_IMG_ROOTFS: sys_img_for_test
+      OTA_IMAGE_OUTPUT: ota_image
+      OTA_IMAGE_ARTIFACT: ota_image.zip
+      DEPLOYED_ROOTFS: deployed_rootfs
+      CERT_DIR: certs
     steps:
       - name: Checkout commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: Build test base container image
+        with:
+          # NOTE: this should be enough to let hatch-vcs determines the
+          #       version from git tags.
+          fetch-depth: 200
+          fetch-tags: true
+      - name: Setup python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version-file: ".python-version"
+      - name: Install uv
+        uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7
+        with:
+          version: "0.10.0"
+      - name: Build and setup ota-image-builder binary
         run: |
-          docker build -f docker/e2e_test_base/Dockerfile -t ota_image_builder_test .
-      - name: E2E test
+          uv run --locked pyinstaller -s -F --optimize=2 \
+            --name ota-image-builder \
+            src/ota_image_builder/__main__.py
+          ./dist/ota-image-builder version
+          ln -s ota-image-builder ./dist/ota-image-tools
+      - name: Setup test PKI
+        run: ./tests/scripts/gen_cert_chain.sh ${CERT_DIR}
+      - name: Prepare test system image rootfs
+        run: sudo ./tests/e2e/scripts/e2e_build_sys_img.sh ${SYS_IMG_ROOTFS}
+      - name: Build OTA image from the input test system image
         run: |
-          docker run --rm \
-            -v `pwd`/docker/e2e_test_base/e2e_test.sh:/entry_point.sh:ro \
-            -v `pwd`/tests/certs/gen_cert_chain.sh:/certs/gen_cert_chain.sh:ro \
-            -v `pwd`/tests/data:/workdir:ro \
-            -w /workdir \
-            --entrypoint=/bin/bash \
-            ota_image_builder_test /entry_point.sh
+          DATA=./tests/data sudo -E ./tests/e2e/scripts/e2e_build_ota_image.sh \
+            ./dist/ota-image-builder \
+            ${SYS_IMG_ROOTFS} \
+            ${OTA_IMAGE_OUTPUT} ${OTA_IMAGE_ARTIFACT}
+      - name: Verify sign cert and signature of the built image
+        run: ./dist/ota-image-tools verify-sign --ca-dir ${CERT_DIR} ${OTA_IMAGE_OUTPUT}
+      - name: Deploy OTA image
+        run: |
+          sudo ./dist/ota-image-tools deploy-image \
+            --image ${OTA_IMAGE_ARTIFACT} \
+            --rootfs-dir ${DEPLOYED_ROOTFS} \
+            --ecu-id autoware --release-key dev
+          sudo rm -rf ${DEPLOYED_ROOTFS}/.ota-resources
+      - name: Compare input output rootfs
+        run: sudo ./tests/e2e/scripts/compare_rootfs.py ${SYS_IMG_ROOTFS} ${DEPLOYED_ROOTFS}

@@ -38,13 +38,13 @@ class TestAddImageConfigAnnotations:
     def test_required_fields(self):
         """Test that required fields must be provided."""
         with pytest.raises(ValidationError):
-            AddImageConfigAnnotations()
+            AddImageConfigAnnotations()  # type: ignore
 
     def test_with_required_fields_only(self):
         """Test with only required fields."""
         model = AddImageConfigAnnotations(
-            base_image="ubuntu:22.04",
-            architecture="aarch64",
+            base_image="ubuntu:22.04",  # type: ignore
+            architecture="aarch64",  # type: ignore
         )
 
         assert model.base_image == "ubuntu:22.04"
@@ -57,13 +57,14 @@ class TestAddImageConfigAnnotations:
     def test_with_all_fields(self):
         """Test with all fields populated."""
         model = AddImageConfigAnnotations(
-            base_image="ubuntu:22.04",
-            architecture="aarch64",
-            description="Test image",
-            created="2025-01-01T00:00:00",
-            os="linux",
-            os_version="22.04",
+            base_image="ubuntu:22.04",  # type: ignore
+            architecture="aarch64",  # type: ignore
         )
+
+        model.description = "Test image"
+        model.created = "2025-01-01T00:00:00"
+        model.os = "linux"
+        model.os_version = "22.04"
 
         assert model.base_image == "ubuntu:22.04"
         assert model.architecture == "aarch64"
@@ -91,8 +92,8 @@ class TestAddImageConfigAnnotations:
     def test_model_dump_by_alias(self):
         """Test that model_dump with by_alias outputs alias names."""
         model = AddImageConfigAnnotations(
-            base_image="test-image",
-            architecture="x86_64",
+            base_image="test-image",  # type: ignore
+            architecture="x86_64",  # type: ignore
         )
 
         dumped = model.model_dump(by_alias=True, exclude_none=True)

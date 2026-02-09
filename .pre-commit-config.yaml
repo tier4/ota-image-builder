@@ -23,5 +23,10 @@ repos:
     hooks:
       - id: markdownlint
         args: ["-c", ".markdownlint.yaml", "--fix"]
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        args: ["--severity=warning"] # Optionally only show errors and warnings
 ci:
   autoupdate_schedule: monthly
