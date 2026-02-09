@@ -53,19 +53,17 @@ jobs:
           ./dist/ota-image-builder version
           ln -s ota-image-builder ./dist/ota-image-tools
       - name: Setup test PKI
-        run: |
-          ./tests/scripts/gen_cert_chain.sh ${CERT_DIR}
+        run: ./tests/scripts/gen_cert_chain.sh ${CERT_DIR}
       - name: Prepare test system image rootfs
-        run: |
-          sudo ./tests/e2e/scripts/e2e_build_sys_img.sh ${SYS_IMG_ROOTFS}
+        run: sudo ./tests/e2e/scripts/e2e_build_sys_img.sh ${SYS_IMG_ROOTFS}
       - name: Build OTA image from the input test system image
         run: |
           DATA=./tests/data sudo -E ./tests/e2e/scripts/e2e_build_ota_image.sh \
             ./dist/ota-image-builder \
             ${SYS_IMG_ROOTFS} \
             ${OTA_IMAGE_OUTPUT} ${OTA_IMAGE_ARTIFACT}
-          # NOTE: ota-image-tools deploy-image works with OTA image artifact
-          sudo rm -rf ${OTA_IMAGE_OUTPUT}
+      - name: Verify sign cert and signature of the built image
+        run: ./dist/ota-image-tools verify-sign --ca-dir ${CERT_DIR} ${OTA_IMAGE_OUTPUT}
       - name: Deploy OTA image
         run: |
           sudo ./dist/ota-image-tools deploy-image \
@@ -74,5 +72,4 @@ jobs:
             --ecu-id autoware --release-key dev
           sudo rm -rf ${DEPLOYED_ROOTFS}/.ota-resources
       - name: Compare input output rootfs
-        run: |
-          sudo ./tests/e2e/scripts/compare_rootfs.py ${SYS_IMG_ROOTFS} ${DEPLOYED_ROOTFS}
+        run: sudo ./tests/e2e/scripts/compare_rootfs.py ${SYS_IMG_ROOTFS} ${DEPLOYED_ROOTFS}
