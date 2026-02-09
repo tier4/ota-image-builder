@@ -27,5 +27,6 @@ repos:
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
+        args: ["--severity=warning"] # Optionally only show errors and warnings
 ci:
   autoupdate_schedule: monthly
