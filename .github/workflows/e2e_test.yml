@@ -68,7 +68,9 @@ jobs:
             ${SYS_IMG_ROOTFS} \
             ${OTA_IMAGE_OUTPUT} ${OTA_IMAGE_ARTIFACT}
       - name: Verify sign cert and signature of the built image
-        run: ./dist/ota-image-tools verify-sign --ca-dir ${CERT_DIR} ${OTA_IMAGE_OUTPUT}
+        run: |
+          rm -rf ${CERT_DIR}/*.key
+          ./dist/ota-image-tools verify-sign --ca-dir ${CERT_DIR} ${OTA_IMAGE_OUTPUT}
       - name: Deploy OTA image
         run: |
           sudo ./dist/ota-image-tools deploy-image \
