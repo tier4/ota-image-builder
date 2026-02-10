@@ -48,7 +48,6 @@ ${BUILDER} -d sign \
     --sign-key ${CERT_DIR}/sign.key \
     --ca-cert ${CERT_DIR}/test.interm.pem \
     ${OTA_IMAGE_DIR}
-rm -rf ${CERT_DIR}/*.key
 
 echo "------------ pack OTA image artifact ------------"
 ${BUILDER} -d pack-artifact \

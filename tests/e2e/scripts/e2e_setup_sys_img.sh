@@ -21,13 +21,13 @@ done
 set -x
 
 # ------ small files ------ #
-SMALL_FILES_COUNT=5000
+SMALL_FILES_COUNT=10000
 SMALL_FILES_FOLDER=/small_files
 
 set +x
 mkdir ${SMALL_FILES_FOLDER}
 for i in $(seq 1 ${SMALL_FILES_COUNT}); do
-    openssl rand -hex 128 > "${SMALL_FILES_FOLDER}/file_$i.txt"
+    dd if=/dev/urandom of="${SMALL_FILES_FOLDER}/file_$i.txt" bs=4k count=1 > /dev/null 2>&1
 done
 set -x
 
@@ -69,7 +69,7 @@ UPPER_IMAGE_REF=upperimage
 UPPER_DOCKERFILE_CONTENTS=$(cat <<EOF
 FROM ${BASE_IMAGE_REF}
 
-RUN rm -rf /lot_of_empty_files; \
+RUN rm -rf /lot_of_empty_files/*; \
     rm -rf /dir_with_subdir; \
     rm -rf /dir_contents_changed/dir_to_be_removed; \
     echo "dir_contents_changed" > /dir_contents_changed/new_content; \
