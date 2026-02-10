@@ -69,7 +69,7 @@ UPPER_IMAGE_REF=upperimage
 UPPER_DOCKERFILE_CONTENTS=$(cat <<EOF
 FROM ${BASE_IMAGE_REF}
 
-RUN rm -rf /lot_of_empty_files; \
+RUN rm -rf /lot_of_empty_files/*; \
     rm -rf /dir_with_subdir; \
     rm -rf /dir_contents_changed/dir_to_be_removed; \
     echo "dir_contents_changed" > /dir_contents_changed/new_content; \
