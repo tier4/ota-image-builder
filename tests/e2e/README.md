@@ -6,7 +6,7 @@ Workflow implementation: [e2e_test.yaml](../../.github/workflows/e2e_test.yml).
 
 The E2E test validates the complete OTA image build-and-deploy cycle by:
 
-1. **Building a test system image** that covers all the features we support (empty files, large files, xattrs, Docker images with deletions, special characters, etc.).
+1. **Building a test system image** that covers all the features we support(files with same contents, empty files, large files, xattrs, Docker images with deletions, special characters, otaclient release packages installed, etc.).
 2. **Creating an OTA image** from the test system generated in step1 using the ota-image-builder.
 3. **Verifying the OTA image** for ensuring the validity and trustworthness of the built image.
 4. **Rebuilding the rootfs** from the OTA image payload.
@@ -25,6 +25,8 @@ This end-to-end workflow ensures:
 
 Exports the `docker:28-dind` image as a base rootfs, then runs [e2e_setup_sys_img.sh](scripts/e2e_setup_sys_img.sh) inside a privileged podman container to setup it as follow:
 
+- **Files with same contents(small files and large files)**: For testing ota-image-builder handling deduplication.
+- **OTAClient release packages installed**: For testing ota-image-builder adding OTAClient release packages.
 - **10,000+ small/empty files**: For testing small files handling(inline, bundle).
 - **500MB large file**: For testing large file handling(compression, slice).
 - **Extended attributes**: File with custom xattrs to verify xattr preservation.
@@ -36,7 +38,7 @@ Exports the `docker:28-dind` image as a base rootfs, then runs [e2e_setup_sys_im
 Executes the full ota-image-builder workflow:
 
 ```text
-init → prepare-sysimg → add-image (dev) → add-image (prd) → finalize → sign → pack-artifact
+init → prepare-sysimg → add-otaclient-package-* → add-image (dev) → add-image (prd) → finalize → sign → pack-artifact
 ```
 
 ### Phase 3: Sign cert and signature validation(with `ota-image-tools verify-sign`)
