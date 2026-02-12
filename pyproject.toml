@@ -134,6 +134,10 @@ addopts = ["-v", "--tb=short"]
 
 [tool.coverage.run]
 source = ["src/ota_image_builder"]
+omit = [
+    "src/ota_image_builder/main.py",
+    "src/ota_image_builder/__main__.py",
+]
 branch = true
 
 [tool.coverage.report]

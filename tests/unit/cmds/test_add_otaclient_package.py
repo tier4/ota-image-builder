@@ -80,6 +80,7 @@ class TestAddOtaclientPackageCmd:
         mock_helper = mocker.MagicMock()
         mock_helper.image_index.image_finalized = False
         mock_helper.image_index.image_signed = False
+        mock_helper.image_index.find_otaclient_package.return_value = None
         mock_helper_class.return_value = mock_helper
 
         mock_add = mocker.patch(

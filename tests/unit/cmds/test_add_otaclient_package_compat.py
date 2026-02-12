@@ -96,22 +96,16 @@ class TestAddOtaclientPackageCompatCmd:
         assert expected_dest.exists()
         assert expected_dest.read_text() == "test content"
 
-    def test_overwrites_existing(self, tmp_path: Path, mocker: MockerFixture):
-        """Test that existing files are overwritten."""
+    def test_already_added_exits(self, tmp_path: Path, mocker: MockerFixture):
+        """Test that already existing legacy compat package causes SystemExit."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
         release_dir = tmp_path / "release"
         release_dir.mkdir()
 
-        # Create destination directory with existing file
+        # Create destination directory to simulate already added package
         dest_dir = image_root / OTACLIENT_RELEASE_DIR_LEGACY
         dest_dir.mkdir(parents=True)
-        existing_file = dest_dir / "test.txt"
-        existing_file.write_text("old content")
-
-        # Create new content in release_dir
-        test_file = release_dir / "test.txt"
-        test_file.write_text("new content")
 
         args = Namespace(
             image_root=str(image_root),
@@ -122,14 +116,6 @@ class TestAddOtaclientPackageCompatCmd:
             "ota_image_builder.cmds.add_otaclient_package_compat.check_if_valid_ota_image",
             return_value=True,
         )
-        mock_helper_class = mocker.patch(
-            "ota_image_builder.cmds.add_otaclient_package_compat.ImageIndexHelper",
-        )
-        mock_helper = mocker.MagicMock()
-        mock_helper.image_index.image_finalized = False
-        mock_helper.image_index.image_signed = False
-        mock_helper_class.return_value = mock_helper
 
-        add_otaclient_package_compat_cmd(args)
-
-        assert existing_file.read_text() == "new content"
+        with pytest.raises(SystemExit):
+            add_otaclient_package_compat_cmd(args)
