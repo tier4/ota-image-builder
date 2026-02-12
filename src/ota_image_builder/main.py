@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from ota_image_libs import version as ota_image_libs_version
 
+from ota_image_builder._common import exit_with_err_msg
 from ota_image_builder.cmds import (
     add_image_cmd_args,
     add_otaclient_package_cmd_args,
@@ -112,4 +113,8 @@ def main():
 
     # ------ execute command ------ #
     handler: Callable = args.handler
-    handler(args)
+    try:
+        handler(args)
+    except Exception as e:
+        logger.exception(f"failed during processing: {e!r}")
+        exit_with_err_msg("Exit on failure occurs.")

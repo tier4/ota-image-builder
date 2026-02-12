@@ -210,11 +210,18 @@ class SystemImageProcesser:
             first_resource, resource_id = self._resource_register.register_entry(digest)
             if first_resource:
                 self._add_entries_to_ft_resource(resource_id, digest, read_size_count)
+                # NOTE(20260212): ALWAYS add a resource entry to the resource_table!
+                #   Resources added by non-OTA-image payload like otaclient release package
+                #   will not be recorded by resource table, while these files may also present
+                #   in the input system image!
+                #   It will not be a problem to add duplicated entry as we set IGNORE on
+                #   duplicated entry insertion.
+                self._add_entries_to_rst(digest, read_size_count)
+
                 # NOTE: in case of multi-image OTA image, skip preparing
                 #       resources that have already being prepared.
                 dst_f = self._resource_dir / digest.hex()
                 if not dst_f.is_file():
-                    self._add_entries_to_rst(digest, read_size_count)
                     shutil.copyfile(src_entry, dst_f, follow_symlinks=False)
 
         self._que.put_nowait(
