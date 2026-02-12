@@ -18,9 +18,15 @@ curl -LO --output-dir "${OTACLIENT_RELEASE_DIR}" "${BASE_URL}/otaclient-arm64-v3
 curl -LO --output-dir "${OTACLIENT_RELEASE_DIR}" "${BASE_URL}/otaclient-x86_64-v3.13.1.squashfs"
 
 # ------ files with same contents ------ #
-SAME_FILE=/same_file
-dd if=/dev/urandom of=${SAME_FILE} bs=1k count=2
-cp ${SAME_FILE} "${SAME_FILE}_1" "${SAME_FILE}_2"
+SMALL_SAME_FILE=/small_same_file
+dd if=/dev/urandom of=${SMALL_SAME_FILE} bs=1k count=2
+cp ${SMALL_SAME_FILE} "${SMALL_SAME_FILE}_1"
+cp ${SMALL_SAME_FILE} "${SMALL_SAME_FILE}_2"
+
+LARGE_SAME_FILE=/large_same_file
+dd if=/dev/urandom of=${LARGE_SAME_FILE} bs=1M count=30
+cp ${LARGE_SAME_FILE} "${LARGE_SAME_FILE}_1"
+cp ${LARGE_SAME_FILE} "${LARGE_SAME_FILE}_2"
 
 # ------ empty files ------ #
 # for otaclient PR#492, add a folder that contains lots of empty files
