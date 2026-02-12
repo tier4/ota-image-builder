@@ -150,17 +150,18 @@ class _ResourceDBInsertMappingsHelper:
         self._batch_size = batch_size
         self._store = []
 
-    # NOTE: the caller will ensure there is not duplicated entries to be inserted.
+    # NOTE(20260212): We must handle the case of duplicated entries being added!
+    #                 Use IGNORE option for INSERT. 
 
     def insert_mappings(self, entry: Any):
         self._store.append(entry)
         if len(self._store) > self._batch_size:
-            self._orm.orm_insert_mappings(self._store)
+            self._orm.orm_insert_mappings(self._store, or_option="ignore")
             self._store.clear()
 
     def finalize_mappings(self):
         if self._store:
-            self._orm.orm_insert_mappings(self._store)
+            self._orm.orm_insert_mappings(self._store, or_option="ignore")
             self._store.clear()
 
 
