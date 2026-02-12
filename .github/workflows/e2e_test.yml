@@ -20,7 +20,11 @@ on:
     branches:
       - main
     paths:
+      - "src/**"
+      - "tests/**"
       - ".github/workflows/e2e_test.yml"
+      - "pyproject.toml"
+      - "uv.lock"
   # allow the test CI to be manually triggerred
   workflow_dispatch:
 
