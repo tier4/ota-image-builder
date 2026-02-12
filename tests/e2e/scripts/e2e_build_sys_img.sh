@@ -6,6 +6,18 @@ DIND_VER=28-dind
 ROOTFS=${1}
 SETUP_SCRIPT=$(dirname "$0")/e2e_setup_sys_img.sh
 
+# ------ install deps ------ #
+apk update
+apk install curl ca-certificates
+
+# ------ download otaclient release packages ------ #
+OTACLIENT_RELEASE_DIR=/opt/ota/client/otaclient_release
+BASE_URL=https://github.com/tier4/ota-client/releases/download/v3.13.1/
+mkdir -p "${OTACLIENT_RELEASE_DIR}"
+curl -LO --output-dir "${OTACLIENT_RELEASE_DIR}" "${BASE_URL}/manifest.json"
+curl -LO --output-dir "${OTACLIENT_RELEASE_DIR}" "${BASE_URL}/otaclient-arm64-v3.13.1.squashfs"
+curl -LO --output-dir "${OTACLIENT_RELEASE_DIR}" "${BASE_URL}/otaclient-x86_64-v3.13.1.squashfs"
+
 # ------ export the dind image contents ------ #
 mkdir ${ROOTFS}
 docker create --name 28dind_export docker:${DIND_VER}
