@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from argparse import Namespace
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
+from pytest_mock import MockerFixture
 
 from ota_image_builder.cmds.add_otaclient_package_compat import (
     OTACLIENT_RELEASE_DIR_LEGACY,
@@ -43,7 +43,7 @@ class TestAddOtaclientPackageCompatCmd:
         with pytest.raises(SystemExit):
             add_otaclient_package_compat_cmd(args)
 
-    def test_nonexistent_release_dir_exits(self, tmp_path: Path):
+    def test_nonexistent_release_dir_exits(self, tmp_path: Path, mocker: MockerFixture):
         """Test that non-existent release directory causes SystemExit."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
@@ -54,14 +54,14 @@ class TestAddOtaclientPackageCompatCmd:
             release_dir=str(release_dir),
         )
 
-        with patch(
+        mocker.patch(
             "ota_image_builder.cmds.add_otaclient_package_compat.check_if_valid_ota_image",
             return_value=True,
-        ):
-            with pytest.raises(SystemExit):
-                add_otaclient_package_compat_cmd(args)
+        )
+        with pytest.raises(SystemExit):
+            add_otaclient_package_compat_cmd(args)
 
-    def test_success(self, tmp_path: Path):
+    def test_success(self, tmp_path: Path, mocker: MockerFixture):
         """Test successful adding of otaclient package with legacy compat."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
@@ -77,18 +77,26 @@ class TestAddOtaclientPackageCompatCmd:
             release_dir=str(release_dir),
         )
 
-        with patch(
+        mocker.patch(
             "ota_image_builder.cmds.add_otaclient_package_compat.check_if_valid_ota_image",
             return_value=True,
-        ):
-            add_otaclient_package_compat_cmd(args)
+        )
+        mock_helper_class = mocker.patch(
+            "ota_image_builder.cmds.add_otaclient_package_compat.ImageIndexHelper",
+        )
+        mock_helper = mocker.MagicMock()
+        mock_helper.image_index.image_finalized = False
+        mock_helper.image_index.image_signed = False
+        mock_helper_class.return_value = mock_helper
+
+        add_otaclient_package_compat_cmd(args)
 
         # Check that the release was copied to the legacy location
         expected_dest = image_root / OTACLIENT_RELEASE_DIR_LEGACY / "test.txt"
         assert expected_dest.exists()
         assert expected_dest.read_text() == "test content"
 
-    def test_overwrites_existing(self, tmp_path: Path):
+    def test_overwrites_existing(self, tmp_path: Path, mocker: MockerFixture):
         """Test that existing files are overwritten."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
@@ -110,10 +118,18 @@ class TestAddOtaclientPackageCompatCmd:
             release_dir=str(release_dir),
         )
 
-        with patch(
+        mocker.patch(
             "ota_image_builder.cmds.add_otaclient_package_compat.check_if_valid_ota_image",
             return_value=True,
-        ):
-            add_otaclient_package_compat_cmd(args)
+        )
+        mock_helper_class = mocker.patch(
+            "ota_image_builder.cmds.add_otaclient_package_compat.ImageIndexHelper",
+        )
+        mock_helper = mocker.MagicMock()
+        mock_helper.image_index.image_finalized = False
+        mock_helper.image_index.image_signed = False
+        mock_helper_class.return_value = mock_helper
+
+        add_otaclient_package_compat_cmd(args)
 
         assert existing_file.read_text() == "new content"
