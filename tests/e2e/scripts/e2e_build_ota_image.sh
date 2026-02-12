@@ -55,6 +55,7 @@ ${BUILDER} -d sign \
     --sign-cert ${CERT_DIR}/sign.pem \
     --sign-key ${CERT_DIR}/sign.key \
     --ca-cert ${CERT_DIR}/test.interm.pem \
+    --legacy-compat \
     ${OTA_IMAGE_DIR}
 
 echo "------------ pack OTA image artifact ------------"
