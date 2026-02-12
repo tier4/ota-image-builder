@@ -22,7 +22,6 @@ import os
 import sqlite3
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from copy import deepcopy
 from hashlib import sha256
 from itertools import count
 from pathlib import Path
@@ -144,9 +143,6 @@ class CompressionFilterProcesser:
         rs_orm = self._db_helper.get_orm()
         with contextlib.closing(rs_orm.orm_con):
             _table_name = rs_orm.orm_table_name
-            # NOTE: resource_id starts from 1
-            next_rs_id = count(start=count_entries_in_table(rs_orm) + 1)
-
             origin_size = 0
 
             _stmt = ResourceTableManifest.table_select_stmt(
@@ -174,8 +170,11 @@ class CompressionFilterProcesser:
 
             # ------ update database ------ #
             # insert the newly added resources
-            # NOTE: resource_id is 1to1 mapping to original resource, so we deepcopy the counter.
-            _copied_counter = deepcopy(next_rs_id)
+            # NOTE: resource_id is 1to1 mapping to original resource, so we have two the count instances here.
+            # NOTE: resource_id starts from 1
+            next_rs_id1 = count(start=count_entries_in_table(rs_orm) + 1)
+            next_rs_id2 = count(start=count_entries_in_table(rs_orm) + 1)
+
             rs_orm.orm_insert_mappings(
                 ResourceTableManifestTypedDict(
                     resource_id=_next_id,
@@ -183,7 +182,7 @@ class CompressionFilterProcesser:
                     size=compressed_size,
                 )
                 for _next_id, (compressed_digest, compressed_size) in zip(
-                    _copied_counter, self._compressed.values(), strict=False
+                    next_rs_id1, self._compressed.values(), strict=False
                 )
             )
 
@@ -197,7 +196,7 @@ class CompressionFilterProcesser:
                             compression_alg=ZSTD_COMPRESSION_ALG,
                         )
                     )
-                    for _next_rs_id in next_rs_id
+                    for _next_rs_id in next_rs_id2
                 ),
                 where_cols=("resource_id",),
                 where_cols_value=(
