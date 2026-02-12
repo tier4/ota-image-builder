@@ -2,8 +2,17 @@
 # run on alpine based dind image
 set -eux
 
+# ------ install deps ------ #
 apk update
-apk add attr
+apk add attr curl ca-certificates
+
+# ------ download otaclient release packages ------ #
+OTACLIENT_RELEASE_DIR=/opt/ota/client/otaclient_release
+BASE_URL=https://github.com/tier4/ota-client/releases/download/v3.13.1/
+mkdir -p "${OTACLIENT_RELEASE_DIR}"
+curl -LO --output-dir "${OTACLIENT_RELEASE_DIR}" "${BASE_URL}/manifest.json"
+curl -LO --output-dir "${OTACLIENT_RELEASE_DIR}" "${BASE_URL}/otaclient-arm64-v3.13.1.squashfs"
+curl -LO --output-dir "${OTACLIENT_RELEASE_DIR}" "${BASE_URL}/otaclient-x86_64-v3.13.1.squashfs"
 
 # check if docker is running properly
 docker info
