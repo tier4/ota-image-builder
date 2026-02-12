@@ -75,7 +75,9 @@ def add_otaclient_package_cmd(args: Namespace) -> None:
         exit_with_err_msg("Modifying an already finalized image is NOT allowed, abort!")
 
     if image_index.find_otaclient_package():
-        exit_with_err_msg("OTAClient release package has already been added into the OTA image, abort!")
+        exit_with_err_msg(
+            "OTAClient release package has already been added into the OTA image, abort!"
+        )
 
     image_index.add_otaclient_package(
         add_otaclient_package(
