@@ -21,6 +21,16 @@ echo "------------ prepare the input system image ------------"
 ${BUILDER} -d prepare-sysimg \
     --rootfs-dir ${SYS_IMG_ROOTFS}
 
+# NOTE: Order of calling cmds matters!
+#   prepare-sysimg -> add-otaclient-package -> add-image
+
+echo "------------ add otaclient package into OTA image ------------"
+${BUILDER} -d add-otaclient-package \
+    --release-dir "${SYS_IMG_ROOTFS}/opt/ota/client/otaclient_release"  "${SYS_IMG_ROOTFS}"
+
+${BUILDER} -d add-otaclient-package-legacy-compat \
+    --release-dir "${SYS_IMG_ROOTFS}/opt/ota/client/otaclient_release"  "${SYS_IMG_ROOTFS}"
+
 echo "------------ add image payload(dev) into OTA image ------------"
 ${BUILDER} -d add-image \
     --annotations-file ${DATA}/full_annotations.yaml \
