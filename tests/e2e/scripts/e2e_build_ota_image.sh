@@ -8,8 +8,6 @@ OTA_IMAGE_ARTIFACT_OUTPUT="$4"
 CERT_DIR=${CERT_DIR}
 DATA=${DATA:-./tests/data}
 
-# TODO: add otaclient release package
-
 mkdir -p ${OTA_IMAGE_DIR}
 
 echo "------------ init empty OTA image ------------"
