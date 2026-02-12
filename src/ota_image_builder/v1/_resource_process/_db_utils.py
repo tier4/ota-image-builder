@@ -151,7 +151,7 @@ class _ResourceDBInsertMappingsHelper:
         self._store = []
 
     # NOTE(20260212): We must handle the case of duplicated entries being added!
-    #                 Use IGNORE option for INSERT. 
+    #                 Use IGNORE option for INSERT.
 
     def insert_mappings(self, entry: Any):
         self._store.append(entry)

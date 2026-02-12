@@ -223,7 +223,7 @@ class SystemImageProcesser:
                 dst_f = self._resource_dir / digest.hex()
                 if not dst_f.is_file():
                     shutil.copyfile(src_entry, dst_f, follow_symlinks=False)
-                
+
         self._que.put_nowait(
             FileTableRegularFiles(
                 path=str(canonical_path),
