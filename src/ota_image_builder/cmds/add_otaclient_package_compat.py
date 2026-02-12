@@ -26,6 +26,8 @@ from argparse import Namespace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ota_image_libs.v1.image_index.utils import ImageIndexHelper
+
 from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
 
 if TYPE_CHECKING:
@@ -70,6 +72,11 @@ def add_otaclient_package_compat_cmd(args: Namespace) -> None:
     release_dir = Path(args.release_dir)
     if not release_dir.is_dir():
         exit_with_err_msg(f"{release_dir} doesn't exist.")
+
+    index_helper = ImageIndexHelper(image_root=image_root)
+    image_index = index_helper.image_index
+    if image_index.image_finalized or image_index.image_signed:
+        exit_with_err_msg("modifying an already finalized image is NOT allowed, abort!")
 
     logger.info(
         "Will try to add otaclient release package "
