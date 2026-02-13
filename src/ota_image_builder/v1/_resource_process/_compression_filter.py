@@ -193,7 +193,7 @@ class CompressionFilterProcesser:
             # batch queries to select compressed entries from db
             compressed_entries: dict[Sha256DigestBytes, ResourceID] = {}
             for _batch in batched(compressed.values(), QUERY_BATCH_SIZE, strict=False):
-                _params_holder = ",".join(itertools.repeat("?", QUERY_BATCH_SIZE))
+                _params_holder = ",".join(itertools.repeat("?", len(_batch)))
                 # fmt: off
                 _query_res = rs_orm.orm_execute(
                     gen_sql_stmt(
