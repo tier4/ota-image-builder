@@ -175,7 +175,21 @@ def _commit_one_bundle(
         )
     ):
         original_bundle_rs_id = original_bundle.resource_id
-    # or commit the original bundle into db if not presented
+        # update the already existed bundle's filter_applied field
+        if not original_bundle.filter_applied:
+            rs_orm.orm_update_entries(
+                set_values=ResourceTableManifestTypedDict(
+                    filter_applied=CompressFilter(
+                        resource_id=compressed_bundle_rs_id,
+                        compression_alg=ZSTD_COMPRESSION_ALG,
+                    ),
+                ),
+                where_cols_value=ResourceTableManifestTypedDict(
+                    resource_id=original_bundle_rs_id,
+                ),
+            )
+        # it should be a very very edge case of having two exactly same bundle.
+        # if that is the case we will not update the filter_applied field.
     else:
         original_bundle_rs_id = next_rs_id
         next_rs_id += 1
