@@ -145,18 +145,60 @@ def _commit_one_bundle(
     compress_res: BundleCompressedResult,
     rs_orm: ResourceTableORM,
 ) -> int:
-    bundle_rs_id = next_rs_id
-    compressed_bundle_rs_id = bundle_rs_id + 1
-    next_rs_id = compressed_bundle_rs_id + 1
+    # NOTE(20260213): need to cover the cases when the newly
+    #   generated bundle is already presented in the resource_table.
 
-    # update the bundled entries rows in db
+    # ------ add compressed bundle into resource db ------ #
+    if compressed_bundle := rs_orm.orm_select_entry(
+        ResourceTableManifestTypedDict(
+            digest=compress_res.compressed_digest,
+        )
+    ):
+        compressed_bundle_rs_id = compressed_bundle.resource_id
+    else:
+        compressed_bundle_rs_id = next_rs_id
+        next_rs_id += 1
+
+        rs_orm.orm_insert_entry(
+            ResourceTableManifest(
+                resource_id=compressed_bundle_rs_id,
+                digest=compress_res.compressed_digest,
+                size=compress_res.compressed_size,
+            )
+        )
+
+    # ------ add original bundle to the resource db ------ #
+    if original_bundle := rs_orm.orm_select_entry(
+        ResourceTableManifestTypedDict(
+            digest=bundle_res.bundle_digest,
+        )
+    ):
+        original_bundle_rs_id = original_bundle.resource_id
+    # or commit the original bundle into db if not presented
+    else:
+        original_bundle_rs_id = next_rs_id
+        next_rs_id += 1
+
+        rs_orm.orm_insert_entry(
+            ResourceTableManifest(
+                resource_id=original_bundle_rs_id,
+                digest=bundle_res.bundle_digest,
+                size=bundle_res.bundle_size,
+                filter_applied=CompressFilter(
+                    resource_id=compressed_bundle_rs_id,
+                    compression_alg=ZSTD_COMPRESSION_ALG,
+                ),
+            )
+        )
+
+    # ------ update the bundled entries rows in db ------ #
     bundled_entries = bundle_res.bundled_entries
     rs_orm.orm_update_entries_many(
         set_cols=("filter_applied",),
         set_cols_value=(
             ResourceTableManifestTypedDict(
                 filter_applied=BundleFilter(
-                    bundle_resource_id=bundle_rs_id,
+                    bundle_resource_id=original_bundle_rs_id,
                     offset=_offset,
                     len=_len,
                 )
@@ -170,26 +212,6 @@ def _commit_one_bundle(
         ),
     )
 
-    # commit original bundle into db
-    rs_orm.orm_insert_entry(
-        ResourceTableManifest(
-            resource_id=bundle_rs_id,
-            digest=bundle_res.bundle_digest,
-            size=bundle_res.bundle_size,
-            filter_applied=CompressFilter(
-                resource_id=compressed_bundle_rs_id,
-                compression_alg=ZSTD_COMPRESSION_ALG,
-            ),
-        )
-    )
-    # commit compressed bundle into db
-    rs_orm.orm_insert_entry(
-        ResourceTableManifest(
-            resource_id=compressed_bundle_rs_id,
-            digest=compress_res.compressed_digest,
-            size=compress_res.compressed_size,
-        )
-    )
     return next_rs_id
 
 
