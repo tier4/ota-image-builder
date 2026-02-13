@@ -18,100 +18,102 @@ from __future__ import annotations
 import sqlite3
 from concurrent.futures import Future
 from hashlib import sha256
-from itertools import count
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
+import ota_image_builder.v1._resource_process._slice_filter as sf_module
 from ota_image_builder.v1._resource_process._slice_filter import (
     SliceFilterProcesser,
-    _count,
     _global_shutdown_on_failed,
+    _planning_rs_id,
     _update_one_batch,
 )
 
 
-class TestCountFunction:
-    """Tests for _count helper function."""
+class TestPlanningRsId:
+    """Tests for _planning_rs_id helper function."""
 
-    def test_count_zero_times(self):
-        """Test counting zero times."""
-        counter = count(start=1)
-        result = _count(counter, 0)
+    def test_assigns_new_ids_when_not_in_db(self, mocker):
+        """Test that new resource IDs are assigned when slices are not in the DB."""
+        mock_orm = mocker.MagicMock()
+        mock_orm.orm_select_entry.return_value = None
 
-        assert result == []
+        digest1 = sha256(b"slice1").digest()
+        digest2 = sha256(b"slice2").digest()
+        batch = [(1, {digest1: 100, digest2: 200})]
 
-    def test_count_one_time(self):
-        """Test counting one time."""
-        counter = count(start=1)
-        result = _count(counter, 1)
+        next_rs_id, planning = _planning_rs_id(mock_orm, batch, 10)
 
-        assert result == [1]
+        assert planning[digest1] == 10
+        assert planning[digest2] == 11
+        assert next_rs_id == 12
 
-    def test_count_multiple_times(self):
-        """Test counting multiple times."""
-        counter = count(start=1)
-        result = _count(counter, 5)
+    def test_reuses_existing_ids_from_db(self, mocker):
+        """Test that existing resource IDs are reused from the DB."""
+        mock_orm = mocker.MagicMock()
+        existing_entry = mocker.MagicMock()
+        existing_entry.resource_id = 42
+        mock_orm.orm_select_entry.return_value = existing_entry
 
-        assert result == [1, 2, 3, 4, 5]
+        digest1 = sha256(b"slice1").digest()
+        batch = [(1, {digest1: 100})]
 
-    def test_count_with_different_start(self):
-        """Test counting with a different start value."""
-        counter = count(start=10)
-        result = _count(counter, 3)
+        next_rs_id, planning = _planning_rs_id(mock_orm, batch, 10)
 
-        assert result == [10, 11, 12]
+        assert planning[digest1] == 42
+        assert next_rs_id == 10  # unchanged since existing entry was found
 
-    def test_count_advances_counter(self):
-        """Test that the counter is advanced after counting."""
-        counter = count(start=1)
+    def test_mixed_existing_and_new(self, mocker):
+        """Test batch with both existing and new slices."""
+        mock_orm = mocker.MagicMock()
+        existing_entry = mocker.MagicMock()
+        existing_entry.resource_id = 99
 
-        # Count 3 times
-        _count(counter, 3)
+        digest_existing = sha256(b"existing").digest()
+        digest_new = sha256(b"new").digest()
 
-        # Next value should be 4
-        assert next(counter) == 4
+        def side_effect(typed_dict):
+            if typed_dict.get("digest") == digest_existing:
+                return existing_entry
+            return None
 
-    def test_count_with_large_number(self):
-        """Test counting a large number of times."""
-        counter = count(start=100)
-        result = _count(counter, 100)
+        mock_orm.orm_select_entry.side_effect = side_effect
 
-        assert len(result) == 100
-        assert result[0] == 100
-        assert result[-1] == 199
+        batch = [(1, {digest_existing: 100, digest_new: 200})]
+        next_rs_id, planning = _planning_rs_id(mock_orm, batch, 10)
+
+        assert planning[digest_existing] == 99
+        assert planning[digest_new] == 10
+        assert next_rs_id == 11
 
 
 class TestGlobalShutdownOnFailed:
     """Tests for _global_shutdown_on_failed function."""
 
-    def test_sets_global_interrupted_and_interrupts_main(self):
+    def test_sets_global_interrupted_and_interrupts_main(self, mocker):
         """Test that the function sets global flag and interrupts main thread."""
-        import ota_image_builder.v1._resource_process._slice_filter as sf_module
 
         # Reset global state
         sf_module._global_interrupted = False
 
-        with patch.object(sf_module, "_thread") as mock_thread:
-            _global_shutdown_on_failed(Exception("test error"))
+        mock_thread = mocker.patch.object(sf_module, "_thread")
+        _global_shutdown_on_failed(Exception("test error"))
 
-            assert sf_module._global_interrupted is True
-            mock_thread.interrupt_main.assert_called_once()
+        assert sf_module._global_interrupted is True
+        mock_thread.interrupt_main.assert_called_once()
 
         # Reset for other tests
         sf_module._global_interrupted = False
 
-    def test_only_interrupts_once(self):
+    def test_only_interrupts_once(self, mocker):
         """Test that interrupt_main is only called once."""
-        import ota_image_builder.v1._resource_process._slice_filter as sf_module
-
         # Set as already interrupted
         sf_module._global_interrupted = True
 
-        with patch.object(sf_module, "_thread") as mock_thread:
-            _global_shutdown_on_failed(Exception("test error"))
+        mock_thread = mocker.patch.object(sf_module, "_thread")
+        _global_shutdown_on_failed(Exception("test error"))
 
-            # Should not call interrupt_main again
-            mock_thread.interrupt_main.assert_not_called()
+        # Should not call interrupt_main again
+        mock_thread.interrupt_main.assert_not_called()
 
         # Reset for other tests
         sf_module._global_interrupted = False
@@ -166,7 +168,7 @@ class TestSliceFilterProcesser:
         assert hasattr(processor._thread_local, "bufferview")
         assert isinstance(processor._thread_local.buffer, bytearray)
 
-    def test_task_done_cb_releases_semaphore(self, tmp_path: Path):
+    def test_task_done_cb_releases_semaphore(self, tmp_path: Path, mocker):
         """Test that task_done_cb releases semaphore."""
         resource_dir = tmp_path / "resources"
         resource_dir.mkdir()
@@ -186,7 +188,7 @@ class TestSliceFilterProcesser:
         processor._se.acquire()
 
         # Create a mock future with no exception
-        mock_future = MagicMock(spec=Future)
+        mock_future = mocker.MagicMock(spec=Future)
         mock_future.exception.return_value = None
 
         processor._task_done_cb(mock_future)
@@ -194,10 +196,8 @@ class TestSliceFilterProcesser:
         # Semaphore should be released
         assert processor._se.acquire(blocking=False) is True
 
-    def test_task_done_cb_handles_exception(self, tmp_path: Path):
+    def test_task_done_cb_handles_exception(self, tmp_path: Path, mocker):
         """Test that task_done_cb handles exceptions."""
-        import ota_image_builder.v1._resource_process._slice_filter as sf_module
-
         resource_dir = tmp_path / "resources"
         resource_dir.mkdir()
         rst_dbf = tmp_path / "resource_table.db"
@@ -219,10 +219,10 @@ class TestSliceFilterProcesser:
         processor._se.acquire()
 
         # Create a mock future with an exception
-        mock_future = MagicMock(spec=Future)
+        mock_future = mocker.MagicMock(spec=Future)
         mock_future.exception.return_value = Exception("test error")
 
-        with patch.object(sf_module, "_thread"):
+        with mocker.patch.object(sf_module, "_thread"):
             processor._task_done_cb(mock_future)
 
             assert sf_module._global_interrupted is True
@@ -316,26 +316,28 @@ class TestSliceFilterProcesser:
 class TestUpdateOneBatch:
     """Tests for _update_one_batch function."""
 
-    def test_update_one_batch_single_entry(self):
+    def test_update_one_batch_single_entry(self, mocker):
         """Test updating a batch with a single entry."""
-        mock_orm = MagicMock()
-        counter = count(start=100)
+        mock_orm = mocker.MagicMock()
+        mock_orm.orm_select_entry.return_value = None
 
         # Create a batch with one entry
         slice_digest = sha256(b"test").digest()
         batch = [(1, {slice_digest: 100})]
 
-        _update_one_batch(mock_orm, batch, counter)
+        result = _update_one_batch(mock_orm, batch, 100)
 
-        # Should have called orm_insert_entries
-        mock_orm.orm_insert_entries.assert_called_once()
+        # Should return the next available resource ID
+        assert result == 101
+        # Should have called orm_insert_mappings
+        mock_orm.orm_insert_mappings.assert_called_once()
         # Should have called orm_update_entries_many
         mock_orm.orm_update_entries_many.assert_called_once()
 
-    def test_update_one_batch_multiple_entries(self):
+    def test_update_one_batch_multiple_entries(self, mocker):
         """Test updating a batch with multiple entries."""
-        mock_orm = MagicMock()
-        counter = count(start=1)
+        mock_orm = mocker.MagicMock()
+        mock_orm.orm_select_entry.return_value = None
 
         # Create a batch with multiple entries
         slice_digest1 = sha256(b"test1").digest()
@@ -346,7 +348,9 @@ class TestUpdateOneBatch:
             (2, {slice_digest3: 200}),
         ]
 
-        _update_one_batch(mock_orm, batch, counter)
+        result = _update_one_batch(mock_orm, batch, 1)
 
-        mock_orm.orm_insert_entries.assert_called_once()
+        # 3 new slices, starting from 1, so next should be 4
+        assert result == 4
+        mock_orm.orm_insert_mappings.assert_called_once()
         mock_orm.orm_update_entries_many.assert_called_once()
