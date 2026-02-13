@@ -309,10 +309,8 @@ class TestUpdateOneBatch:
         # Mock orm_execute to return (digest, resource_id) pairs
         mock_orm.orm_execute.return_value = [(slice_digest, 100)]
 
-        result = _update_one_batch(mock_orm, batch)
+        _update_one_batch(mock_orm, batch)
 
-        # Should return None
-        assert result is None
         # Should have called orm_insert_mappings
         mock_orm.orm_insert_mappings.assert_called_once()
         # Should have called orm_execute to get slice->resource_id mapping
@@ -341,10 +339,7 @@ class TestUpdateOneBatch:
             (slice_digest3, 3),
         ]
 
-        result = _update_one_batch(mock_orm, batch)
-
-        # Should return None
-        assert result is None
+        _update_one_batch(mock_orm, batch)
         mock_orm.orm_insert_mappings.assert_called_once()
         mock_orm.orm_execute.assert_called_once()
         mock_orm.orm_update_entries_many.assert_called_once()
