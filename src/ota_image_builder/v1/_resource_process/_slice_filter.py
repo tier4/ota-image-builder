@@ -22,18 +22,15 @@ import signal
 import sqlite3
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from copy import deepcopy
 from hashlib import sha256
-from itertools import count
 from pathlib import Path
 from queue import Queue
 from threading import Semaphore
-from typing import NoReturn
+from typing import NoReturn, TypeAlias
 
 from ota_image_libs._resource_filter import SliceFilter
 from ota_image_libs.v1.resource_table.db import ResourceTableDBHelper, ResourceTableORM
 from ota_image_libs.v1.resource_table.schema import (
-    ResourceTableManifest,
     ResourceTableManifestTypedDict,
 )
 from simple_sqlite3_orm import gen_sql_stmt
@@ -41,11 +38,15 @@ from simple_sqlite3_orm import gen_sql_stmt
 from ota_image_builder._common import func_call_with_se, human_readable_size
 from ota_image_builder._configs import cfg
 
+from ._common import ResourceID, Sha256DigestBytes, Size
 from ._db_utils import count_entries_in_table
 
 logger = logging.getLogger(__name__)
 
 _global_interrupted = False
+
+Sliced: TypeAlias = tuple[ResourceID, dict[Sha256DigestBytes, Size]]
+"""<original_rs_id>, dict[<slice_digest>, <slice_size>]."""
 
 
 def _global_shutdown_on_failed(exc: BaseException):
@@ -57,36 +58,40 @@ def _global_shutdown_on_failed(exc: BaseException):
         _thread.interrupt_main(signal.SIGINT)
 
 
-def _count(counter: count, times: int) -> list[int]:
-    """Count a itertools.count instance <times> times,
-    return the list of counted numbers."""
-    return [_c for _, _c in zip(range(times), counter, strict=False)]
+def _planning_rs_id(
+    rs_orm: ResourceTableORM, batch: list[Sliced], cur_rs_id: int
+) -> tuple[int, dict[Sha256DigestBytes, ResourceID]]:
+    """Plan the resource_id assignment for slices, with considering
+    the edge case of slice resource already presented in the db."""
+    _res: dict[Sha256DigestBytes, ResourceID] = {}
+    for _, _slices in batch:
+        for _slice_digest in _slices:
+            if _selected := rs_orm.orm_select_entry(
+                ResourceTableManifestTypedDict(digest=_slice_digest)
+            ):
+                _res[_slice_digest] = _selected.resource_id
+            else:
+                _res[_slice_digest] = cur_rs_id
+                cur_rs_id += 1
+    return cur_rs_id, _res
 
 
 def _update_one_batch(
-    rs_orm: ResourceTableORM,
-    batch: list[tuple[int, dict[bytes, int]]],
-    counter: count,
-) -> count:
-    _slice_counter = deepcopy(counter)
-    _update_counter = deepcopy(counter)
-
-    # first insert new slice entries
+    rs_orm: ResourceTableORM, batch: list[tuple[int, dict[bytes, int]]], cur_rs_id: int
+) -> int:
     # NOTE: there is possibility that, one slice from file A might be
-    #       the same of another slice from file B. With this consideration,
-    #       `digest` is not expected to be unique in resource_table.
-    #       But in blob storage, deduplication will still work.
-    def slices_batch():
-        for _entry in batch:
-            yield from _entry[1].items()
-
-    rs_orm.orm_insert_entries(
+    #       the same of another slice from file B. We must handle this case!
+    # NOTE: DO NOT overwrite already exists resources!
+    next_rs_id, _planning = _planning_rs_id(rs_orm, batch, cur_rs_id)
+    rs_orm.orm_insert_mappings(
         (
-            ResourceTableManifest(resource_id=_rs_id, digest=_digest, size=_size)
-            for _rs_id, (_digest, _size) in zip(
-                _slice_counter, slices_batch(), strict=False
+            ResourceTableManifestTypedDict(
+                resource_id=_planning[_digest], digest=_digest, size=_size
             )
-        )
+            for _entry in batch
+            for _digest, _size in _entry[1].items()
+        ),
+        or_option="ignore",
     )
 
     # then update the sliced origin's filter_applied field
@@ -95,7 +100,7 @@ def _update_one_batch(
         set_cols_value=(
             ResourceTableManifestTypedDict(
                 filter_applied=SliceFilter(
-                    slices=_count(_update_counter, len(_slices)),
+                    slices=[_planning[_digest] for _digest in _slices],
                 )
             )
             for _, _slices in batch
@@ -106,7 +111,7 @@ def _update_one_batch(
             for _resource_id, _ in batch
         ),
     )
-    return _update_counter
+    return next_rs_id
 
 
 class SliceFilterProcesser:
@@ -175,61 +180,64 @@ class SliceFilterProcesser:
         entry_fpath.unlink(missing_ok=True)  # finally, remove the original resource
         self._sliced.put_nowait((resource_id, slices))
 
-    def _update_db(self, rs_orm: ResourceTableORM, rs_id_start: int):
-        rs_id_counter = count(start=rs_id_start)
+    # ------------------------ #
 
+    def _update_db(self, rs_orm: ResourceTableORM, rs_id_start: int):
+        cur_rs_id = rs_id_start
         batch: list[tuple[int, dict[bytes, int]]] = []
         while _entry := self._sliced.get_nowait():
             batch.append(_entry)
             if len(batch) > self._update_batch:
-                rs_id_counter = _update_one_batch(rs_orm, batch, rs_id_counter)
+                cur_rs_id = _update_one_batch(rs_orm, batch, cur_rs_id)
                 batch.clear()
         if batch:
-            _update_one_batch(rs_orm, batch, rs_id_counter)
+            _update_one_batch(rs_orm, batch, cur_rs_id)
+
+    def _do_slicing(self, rs_orm: ResourceTableORM) -> tuple[int, int]:
+        sliced_count, sliced_size = 0, 0
+        _table_name = rs_orm.orm_table_name
+
+        with ThreadPoolExecutor(
+            max_workers=self._worker_threads,
+            thread_name_prefix="slice_filter",
+            initializer=self._thread_worker_initializer,
+        ) as pool:
+            submit_with_se = func_call_with_se(pool.submit, self._se)
+            # fmt: off
+            for _row in rs_orm.orm_select_entries(
+                _stmt=rs_orm.orm_table_spec.table_select_stmt(
+                    select_from=_table_name,
+                    select_cols=("resource_id", "digest", "size"),
+                    where_stmt=gen_sql_stmt(
+                        "WHERE","size", ">", f"{self._lower_bound}",
+                        "AND", "filter_applied IS NULL",
+                        end_with=None,
+                    ),
+                ),
+                _row_factory=sqlite3.Row,
+            ):
+                resource_id, entry_digest, entry_size = _row
+                if entry_digest in self._protected_resources:
+                    continue
+
+                sliced_count += 1
+                sliced_size += entry_size
+
+                submit_with_se(self._process_one_origin_at_thread,
+                    resource_id, entry_digest, entry_size
+                ).add_done_callback(self._task_done_cb)
+            # fmt: on
+        self._sliced.put_nowait(None)
+        return sliced_count, sliced_size
 
     def process(self):
         rs_orm = self._db_helper.get_orm()
-        sliced_count, sliced_size = 0, 0
         with contextlib.closing(rs_orm.orm_con):
-            _table_name = rs_orm.orm_table_name
+            sliced_count, sliced_size = self._do_slicing(rs_orm)
+
             # NOTE: resource_id starts from 1
-            rs_id_start = count_entries_in_table(rs_orm) + 1
-
-            # ------ step1: slicing large files ------ #
-            # fmt: off
-            with ThreadPoolExecutor(
-                max_workers=self._worker_threads,
-                thread_name_prefix="slice_filter",
-                initializer=self._thread_worker_initializer,
-            ) as pool:
-                submit_with_se = func_call_with_se(pool.submit, self._se)
-                for _row in rs_orm.orm_select_entries(
-                    _stmt=rs_orm.orm_table_spec.table_select_stmt(
-                        select_from=_table_name,
-                        select_cols=("resource_id", "digest", "size"),
-                        where_stmt=gen_sql_stmt(
-                            "WHERE","size", ">", f"{self._lower_bound}",
-                            "AND", "filter_applied IS NULL",
-                            end_with=None,
-                        ),
-                    ),
-                    _row_factory=sqlite3.Row,
-                ):
-                    resource_id, entry_digest, entry_size = _row
-                    if entry_digest in self._protected_resources:
-                        continue
-
-                    sliced_count += 1
-                    sliced_size += entry_size
-
-                    submit_with_se(self._process_one_origin_at_thread,
-                        resource_id, entry_digest, entry_size
-                    ).add_done_callback(self._task_done_cb)
-            # fmt: on
-            self._sliced.put_nowait(None)
-
-            # ------ step2: update resource_table database ------ #
-            self._update_db(rs_orm, rs_id_start)
+            next_rs_id = count_entries_in_table(rs_orm) + 1
+            self._update_db(rs_orm, next_rs_id)
 
         logger.info(
             f"slice_filter: total {sliced_count} files({human_readable_size(sliced_size)}) are sliced."
