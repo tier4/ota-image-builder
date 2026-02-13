@@ -40,13 +40,14 @@ from ota_image_builder._common import human_readable_size
 from ota_image_builder._configs import cfg
 from ota_image_builder.v1._resource_process._db_utils import count_entries_in_table
 
+from ._common import ResourceID, Sha256DigestBytes
+
 logger = logging.getLogger(__name__)
 
-# If the bundle is smaller than 3MiB, we don't
-#   create bundle from it.
-MINIMUM_BUNDLE_SIZE_RATIO = 0.1
+# If the bundle is smaller than 3MiB, we don't create bundle from it.
+MINIMUM_BUNDLE_SIZE_RATIO = 0.05
 
-BundledEntries = dict[tuple[int, bytes], tuple[int, int]]
+BundledEntries = dict[tuple[ResourceID, Sha256DigestBytes], tuple[int, int]]
 """
 (origin_rs_id, origin_digest), (offset, len)
 """

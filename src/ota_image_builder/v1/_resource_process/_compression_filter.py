@@ -24,7 +24,6 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
-from typing import TypeAlias
 
 import zstandard
 from ota_image_libs._resource_filter import CompressFilter
@@ -43,13 +42,12 @@ from ota_image_builder._common import (
 )
 from ota_image_builder._configs import cfg
 
+from ._common import ResourceID, Sha256DigestBytes, Size
+
 logger = logging.getLogger(__name__)
 
 _global_shutdown = False
 
-ResourceID: TypeAlias = int
-Sha256DigestBytes: TypeAlias = bytes
-Size: TypeAlias = int
 CompressionResult = WriteThreadSafeDict[ResourceID, tuple[Sha256DigestBytes, Size]]
 
 
