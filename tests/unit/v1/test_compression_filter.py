@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import zstandard
 
+from ota_image_builder._common import WriteThreadSafeDict
 from ota_image_builder.v1._resource_process._compression_filter import (
     CompressionFilterProcesser,
 )
@@ -212,12 +213,14 @@ class TestCompressionFilterProcesser:
         test_file.write_bytes(content)
 
         # Process the entry
-        processor._process_one_entry_at_thread((1, test_digest, 1000))
+
+        compressed = WriteThreadSafeDict()
+        processor._process_one_entry_at_thread((1, test_digest, 1000), compressed)
 
         # Original file should still exist (compression ratio not met)
         assert test_file.exists()
         # Should not be in compressed dict
-        assert 1 not in processor._compressed
+        assert 1 not in compressed
 
     def test_process_one_entry_compression_meets_threshold(self, tmp_path: Path):
         """Test that files meeting compression ratio are replaced."""
@@ -247,9 +250,10 @@ class TestCompressionFilterProcesser:
         test_file.write_bytes(content)
 
         # Process the entry
-        processor._process_one_entry_at_thread((1, test_digest, 100000))
+        compressed = WriteThreadSafeDict()
+        processor._process_one_entry_at_thread((1, test_digest, 100000), compressed)
 
         # Original file should be removed
         assert not test_file.exists()
         # Should be in compressed dict
-        assert 1 in processor._compressed
+        assert 1 in compressed
