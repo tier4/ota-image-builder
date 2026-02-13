@@ -40,7 +40,7 @@ from ota_image_builder._common import human_readable_size
 from ota_image_builder._configs import cfg
 from ota_image_builder.v1._resource_process._db_utils import count_entries_in_table
 
-from ._common import ResourceID, Sha256DigestBytes
+from ._common import ResourceID, Sha256DigestBytes, Size
 
 logger = logging.getLogger(__name__)
 
@@ -54,29 +54,29 @@ BundledEntries = dict[tuple[ResourceID, Sha256DigestBytes], tuple[int, int]]
 
 
 class EntryToBeBundled(NamedTuple):
-    resource_id: int
-    digest: bytes
-    size: int
+    resource_id: ResourceID
+    digest: Sha256DigestBytes
+    size: Size
 
 
 class BundleResult(NamedTuple):
-    bundle_digest: bytes
-    bundle_size: int
+    bundle_digest: Sha256DigestBytes
+    bundle_size: Size
     bundled_entries: BundledEntries
 
 
 class BundleCompressedResult(NamedTuple):
-    compressed_digest: bytes
-    compressed_size: int
+    compressed_digest: Sha256DigestBytes
+    compressed_size: Size
 
 
 def _batch_entries_with_filter(
     entries_to_bundle_gen: Generator[EntryToBeBundled],
     *,
-    expected_bundle_size: int,
+    expected_bundle_size: Size,
     min_bundle_ratio: float = MINIMUM_BUNDLE_SIZE_RATIO,
-    excluded_resources: set[bytes],
-) -> Generator[tuple[int, list[EntryToBeBundled]]]:
+    excluded_resources: set[Sha256DigestBytes],
+) -> Generator[tuple[Size, list[EntryToBeBundled]]]:
     _batch = []
     _this_batch_size = 0
     for _entry in entries_to_bundle_gen:
@@ -95,7 +95,7 @@ def _batch_entries_with_filter(
 
 
 def _generate_one_bundle(
-    entries_to_bundle: tuple[int, list[EntryToBeBundled]],
+    entries_to_bundle: tuple[Size, list[EntryToBeBundled]],
     *,
     resource_dir: Path,
     cctx: zstandard.ZstdCompressor,
@@ -141,7 +141,7 @@ def _generate_one_bundle(
 
 def _commit_one_bundle(
     *,
-    next_rs_id: int,
+    next_rs_id: ResourceID,
     bundle_res: BundleResult,
     compress_res: BundleCompressedResult,
     rs_orm: ResourceTableORM,
@@ -223,7 +223,7 @@ def _commit_one_bundle(
         where_cols=("resource_id",),
         where_cols_value=(
             ResourceTableManifestTypedDict(resource_id=_resource_id)
-            for _resource_id, _ in bundled_entries.keys()
+            for _resource_id, _ in bundled_entries
         ),
     )
 

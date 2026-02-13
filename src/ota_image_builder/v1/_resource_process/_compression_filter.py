@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import _thread
-import contextlib
 import logging
 import os
 import sqlite3
@@ -29,7 +28,7 @@ import zstandard
 from ota_image_libs._resource_filter import CompressFilter
 from ota_image_libs.common import tmp_fname
 from ota_image_libs.v1.consts import ZSTD_COMPRESSION_ALG
-from ota_image_libs.v1.resource_table.db import ResourceTableDBHelper
+from ota_image_libs.v1.resource_table.db import ResourceTableDBHelper, ResourceTableORM
 from ota_image_libs.v1.resource_table.schema import (
     ResourceTableManifest,
     ResourceTableManifestTypedDict,
@@ -106,8 +105,8 @@ class CompressionFilterProcesser:
 
     def _process_one_entry_at_thread(
         self,
-        row: tuple[int, bytes, int],
-        compressed: WriteThreadSafeDict[int, tuple[bytes, int]],
+        row: tuple[ResourceID, Sha256DigestBytes, Size],
+        compressed: CompressionResult,
     ) -> None:
         resource_id, origin_digest, origin_size = row
         origin_resource = self._resource_dir / origin_digest.hex()
@@ -139,18 +138,15 @@ class CompressionFilterProcesser:
                 _global_shutdown = True
                 _thread.interrupt_main()
 
-    def _process_compression(self) -> tuple[int, CompressionResult]:
+    def _process_compression(
+        self, rs_orm: ResourceTableORM
+    ) -> tuple[int, CompressionResult]:
         origin_size, compressed = 0, CompressionResult()
-
-        rs_orm = self._db_helper.get_orm()
-        with (
-            contextlib.closing(rs_orm.orm_con),
-            ThreadPoolExecutor(
-                initializer=self._thread_worker_initializer,
-                max_workers=self._worker_threads,
-                thread_name_prefix="ota_image_builder",
-            ) as pool,
-        ):
+        with ThreadPoolExecutor(
+            initializer=self._thread_worker_initializer,
+            max_workers=self._worker_threads,
+            thread_name_prefix="ota_image_builder",
+        ) as pool:
             _stmt = ResourceTableManifest.table_select_stmt(
                 select_from=rs_orm.orm_table_name,
                 select_cols=("resource_id", "digest", "size"),
@@ -173,43 +169,42 @@ class CompressionFilterProcesser:
 
         return origin_size, compressed
 
-    def _update_db(self, compressed: CompressionResult):
-        rs_orm = self._db_helper.get_orm()
-        with contextlib.closing(rs_orm.orm_con):
-            # NOTE: DO NOT overwrite the already there resources if any!
-            rs_orm.orm_insert_mappings(
-                (
-                    ResourceTableManifestTypedDict(
-                        digest=compressed_digest,
-                        size=compressed_size,
-                    )
-                    for compressed_digest, compressed_size in compressed.values()
-                ),
-                or_option="ignore",
+    def _update_db(self, rs_orm: ResourceTableORM, compressed: CompressionResult):
+        # NOTE: DO NOT overwrite the already there resources if any!
+        rs_orm.orm_insert_mappings(
+            (
+                ResourceTableManifestTypedDict(
+                    digest=compressed_digest,
+                    size=compressed_size,
+                )
+                for compressed_digest, compressed_size in compressed.values()
+            ),
+            or_option="ignore",
+        )
+
+        for origin_rs_id, (compressed_digest, _) in compressed.items():
+            # look up the compressed entry
+            _compressed_entry = rs_orm.orm_select_entry(
+                ResourceTableManifestTypedDict(digest=compressed_digest)
             )
 
-            for origin_rs_id, (compressed_digest, _) in compressed.items():
-                # look up the compressed entry
-                _compressed_entry = rs_orm.orm_select_entry(
-                    ResourceTableManifestTypedDict(digest=compressed_digest)
-                )
-
-                # update the origin entry
-                rs_orm.orm_update_entries(
-                    set_values=ResourceTableManifestTypedDict(
-                        filter_applied=CompressFilter(
-                            resource_id=_compressed_entry.resource_id,
-                            compression_alg=ZSTD_COMPRESSION_ALG,
-                        )
-                    ),
-                    where_cols_value=ResourceTableManifestTypedDict(
-                        resource_id=origin_rs_id
-                    ),
-                )
+            # update the origin entry
+            rs_orm.orm_update_entries(
+                set_values=ResourceTableManifestTypedDict(
+                    filter_applied=CompressFilter(
+                        resource_id=_compressed_entry.resource_id,
+                        compression_alg=ZSTD_COMPRESSION_ALG,
+                    )
+                ),
+                where_cols_value=ResourceTableManifestTypedDict(
+                    resource_id=origin_rs_id
+                ),
+            )
 
     def process(self) -> None:
-        origin_size, _compressed = self._process_compression()
-        self._update_db(_compressed)
+        with self._db_helper.get_orm() as rs_orm:
+            origin_size, _compressed = self._process_compression(rs_orm)
+            self._update_db(rs_orm, _compressed)
 
         compressed = len(_compressed)
         compressed_size = sum(_size for _, _size in _compressed.values())
