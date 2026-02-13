@@ -38,9 +38,9 @@ from simple_sqlite3_orm.utils import wrap_value
 
 from ota_image_builder._common import human_readable_size
 from ota_image_builder._configs import cfg
-from ota_image_builder.v1._resource_process._db_utils import count_entries_in_table
 
 from ._common import ResourceID, Sha256DigestBytes, Size
+from ._db_utils import count_entries_in_table
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +223,7 @@ def _commit_one_bundle(
         where_cols=("resource_id",),
         where_cols_value=(
             ResourceTableManifestTypedDict(resource_id=_resource_id)
-            for _resource_id, _ in bundled_entries
+            for _resource_id, _ in bundled_entries.keys()
         ),
     )
 
@@ -240,7 +240,7 @@ class BundleFilterProcesser:
         bundle_upper_bound: int = cfg.BUNDLE_UPPER_THRESHOULD,
         bundle_blob_size: int = cfg.BUNDLE_SIZE,
         bundle_compressed_max_sum: int = cfg.BUNDLES_COMPRESSED_MAXIMUM_SUM,
-        protected_resources: set[bytes],
+        protected_resources: set[Sha256DigestBytes],
     ) -> None:
         self._protected_resources = protected_resources
         self._resource_dir = resource_dir
@@ -251,8 +251,7 @@ class BundleFilterProcesser:
         self._bundle_compressed_max_sum = bundle_compressed_max_sum
 
     def process(self):
-        with contextlib.closing(self._db_helper.connect_rstable_db()) as conn:
-            rs_orm = self._db_helper.get_orm(conn)
+        with self._db_helper.get_orm() as rs_orm:
             _table_name, _table_spec = rs_orm.orm_table_name, rs_orm.orm_table_spec
 
             #
@@ -331,7 +330,7 @@ class BundleFilterProcesser:
             # NOTE: resource_id starts from 1
             # NOTE: we cannot execute sqlite3 query when previous query hasn't finished,
             #       so we pre-calculate the next_rs_id here.
-            next_rs_id: int = count_entries_in_table(rs_orm) + 1
+            next_rs_id = count_entries_in_table(rs_orm) + 1
             for _bundle_res, _compress_res in bundle_results:
                 next_rs_id = _commit_one_bundle(
                     next_rs_id=next_rs_id,

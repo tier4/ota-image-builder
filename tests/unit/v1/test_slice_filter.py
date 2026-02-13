@@ -265,7 +265,7 @@ class TestSliceFilterProcesser:
         assert not test_file.exists()
 
         # Sliced files should exist
-        result = processor._sliced.get_nowait()
+        result = processor._slice_res_queue.get_nowait()
         assert result is not None
         assert result[0] == resource_id
         assert len(result[1]) >= 2  # Should have multiple slices

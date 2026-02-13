@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import _thread
-import contextlib
 import logging
 import signal
 import sqlite3
@@ -59,10 +58,15 @@ def _global_shutdown_on_failed(exc: BaseException):
 
 
 def _planning_rs_id(
-    rs_orm: ResourceTableORM, batch: list[Sliced], cur_rs_id: int
-) -> tuple[int, dict[Sha256DigestBytes, ResourceID]]:
+    rs_orm: ResourceTableORM, batch: list[Sliced], cur_rs_id: ResourceID
+) -> tuple[ResourceID, dict[Sha256DigestBytes, ResourceID]]:
     """Plan the resource_id assignment for slices, with considering
-    the edge case of slice resource already presented in the db."""
+    the edge case of slice resource already presented in the db.
+
+    NOTE that currently we will do select for each slices, this might
+        be a performance penalty, but normally we will only have small
+        number of slices(less than 300 in autoware ECU), so not a big problem.
+    """
     _res: dict[Sha256DigestBytes, ResourceID] = {}
     for _, _slices in batch:
         for _slice_digest in _slices:
@@ -77,7 +81,7 @@ def _planning_rs_id(
 
 
 def _update_one_batch(
-    rs_orm: ResourceTableORM, batch: list[tuple[int, dict[bytes, int]]], cur_rs_id: int
+    rs_orm: ResourceTableORM, batch: list[Sliced], cur_rs_id: ResourceID
 ) -> int:
     # NOTE: there is possibility that, one slice from file A might be
     #       the same of another slice from file B. We must handle this case!
@@ -124,7 +128,7 @@ class SliceFilterProcesser:
         worker_threads: int = cfg.WORKER_THREADS,
         concurrent_tasks: int = cfg.SLICE_CONCURRENT_TASKS,
         db_update_batch_size: int = cfg.SLICE_UPDATE_BATCH_SIZE,
-        protected_resources: set[bytes],
+        protected_resources: set[Sha256DigestBytes],
     ) -> None:
         self._protected_resources = protected_resources
         self._update_batch = db_update_batch_size
@@ -141,8 +145,7 @@ class SliceFilterProcesser:
         self._max_slice_size = max_slice_size
         self._thread_local = threading.local()
 
-        # <resource_id>: <slice_digest>,<slice_size>
-        self._sliced: Queue[tuple[int, dict[bytes, int]] | None] = Queue()
+        self._slice_res_queue: Queue[Sliced | None] = Queue()
 
     def _thread_worker_initializer(self) -> None:
         _thread_local = self._thread_local
@@ -156,11 +159,11 @@ class SliceFilterProcesser:
             _global_shutdown_on_failed(exc)
 
     def _process_one_origin_at_thread(
-        self, resource_id: int, entry_digest: bytes, entry_size: int
+        self, resource_id: ResourceID, entry_digest: Sha256DigestBytes, entry_size: Size
     ):
         _thread_local = self._thread_local
         _buffer, _buffer_view = _thread_local.buffer, _thread_local.bufferview
-        slices: dict[bytes, int] = {}
+        slices: dict[Sha256DigestBytes, Size] = {}
 
         entry_fpath = self._resource_dir / entry_digest.hex()
         with open(entry_fpath, "rb") as _entry_f:
@@ -178,14 +181,14 @@ class SliceFilterProcesser:
                 entry_size -= _process_chunk()
             _process_chunk()  # read final chunk of data
         entry_fpath.unlink(missing_ok=True)  # finally, remove the original resource
-        self._sliced.put_nowait((resource_id, slices))
+        self._slice_res_queue.put_nowait((resource_id, slices))
 
     # ------------------------ #
 
-    def _update_db(self, rs_orm: ResourceTableORM, rs_id_start: int):
+    def _update_db(self, rs_orm: ResourceTableORM, rs_id_start: ResourceID):
         cur_rs_id = rs_id_start
-        batch: list[tuple[int, dict[bytes, int]]] = []
-        while _entry := self._sliced.get_nowait():
+        batch: list[Sliced] = []
+        while _entry := self._slice_res_queue.get_nowait():
             batch.append(_entry)
             if len(batch) > self._update_batch:
                 cur_rs_id = _update_one_batch(rs_orm, batch, cur_rs_id)
@@ -193,7 +196,7 @@ class SliceFilterProcesser:
         if batch:
             _update_one_batch(rs_orm, batch, cur_rs_id)
 
-    def _do_slicing(self, rs_orm: ResourceTableORM) -> tuple[int, int]:
+    def _do_slicing(self, rs_orm: ResourceTableORM) -> tuple[int, Size]:
         sliced_count, sliced_size = 0, 0
         _table_name = rs_orm.orm_table_name
 
@@ -227,12 +230,11 @@ class SliceFilterProcesser:
                     resource_id, entry_digest, entry_size
                 ).add_done_callback(self._task_done_cb)
             # fmt: on
-        self._sliced.put_nowait(None)
+        self._slice_res_queue.put_nowait(None)
         return sliced_count, sliced_size
 
     def process(self):
-        rs_orm = self._db_helper.get_orm()
-        with contextlib.closing(rs_orm.orm_con):
+        with self._db_helper.get_orm() as rs_orm:
             sliced_count, sliced_size = self._do_slicing(rs_orm)
 
             # NOTE: resource_id starts from 1
