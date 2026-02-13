@@ -24,66 +24,47 @@ import ota_image_builder.v1._resource_process._slice_filter as sf_module
 from ota_image_builder.v1._resource_process._slice_filter import (
     SliceFilterProcesser,
     _global_shutdown_on_failed,
-    _planning_rs_id,
+    _iter_slices,
     _update_one_batch,
 )
 
 
-class TestPlanningRsId:
-    """Tests for _planning_rs_id helper function."""
+class TestIterSlices:
+    """Tests for _iter_slices helper function."""
 
-    def test_assigns_new_ids_when_not_in_db(self, mocker):
-        """Test that new resource IDs are assigned when slices are not in the DB."""
-        mock_orm = mocker.MagicMock()
-        mock_orm.orm_select_entry.return_value = None
-
+    def test_single_entry(self):
+        """Test iterating slices from a single batch entry."""
         digest1 = sha256(b"slice1").digest()
         digest2 = sha256(b"slice2").digest()
         batch = [(1, {digest1: 100, digest2: 200})]
 
-        next_rs_id, planning = _planning_rs_id(mock_orm, batch, 10)
+        result = list(_iter_slices(batch))
 
-        assert planning[digest1] == 10
-        assert planning[digest2] == 11
-        assert next_rs_id == 12
+        assert len(result) == 2
+        assert (digest1, 100) in result
+        assert (digest2, 200) in result
 
-    def test_reuses_existing_ids_from_db(self, mocker):
-        """Test that existing resource IDs are reused from the DB."""
-        mock_orm = mocker.MagicMock()
-        existing_entry = mocker.MagicMock()
-        existing_entry.resource_id = 42
-        mock_orm.orm_select_entry.return_value = existing_entry
-
+    def test_multiple_entries(self):
+        """Test iterating slices from multiple batch entries."""
         digest1 = sha256(b"slice1").digest()
-        batch = [(1, {digest1: 100})]
+        digest2 = sha256(b"slice2").digest()
+        digest3 = sha256(b"slice3").digest()
+        batch = [
+            (1, {digest1: 100, digest2: 200}),
+            (2, {digest3: 300}),
+        ]
 
-        next_rs_id, planning = _planning_rs_id(mock_orm, batch, 10)
+        result = list(_iter_slices(batch))
 
-        assert planning[digest1] == 42
-        assert next_rs_id == 10  # unchanged since existing entry was found
+        assert len(result) == 3
+        assert (digest1, 100) in result
+        assert (digest2, 200) in result
+        assert (digest3, 300) in result
 
-    def test_mixed_existing_and_new(self, mocker):
-        """Test batch with both existing and new slices."""
-        mock_orm = mocker.MagicMock()
-        existing_entry = mocker.MagicMock()
-        existing_entry.resource_id = 99
-
-        digest_existing = sha256(b"existing").digest()
-        digest_new = sha256(b"new").digest()
-
-        def side_effect(typed_dict):
-            if typed_dict.get("digest") == digest_existing:
-                return existing_entry
-            return None
-
-        mock_orm.orm_select_entry.side_effect = side_effect
-
-        batch = [(1, {digest_existing: 100, digest_new: 200})]
-        next_rs_id, planning = _planning_rs_id(mock_orm, batch, 10)
-
-        assert planning[digest_existing] == 99
-        assert planning[digest_new] == 10
-        assert next_rs_id == 11
+    def test_empty_batch(self):
+        """Test iterating slices from an empty batch."""
+        result = list(_iter_slices([]))
+        assert result == []
 
 
 class TestGlobalShutdownOnFailed:
@@ -319,25 +300,30 @@ class TestUpdateOneBatch:
     def test_update_one_batch_single_entry(self, mocker):
         """Test updating a batch with a single entry."""
         mock_orm = mocker.MagicMock()
-        mock_orm.orm_select_entry.return_value = None
+        mock_orm.orm_table_name = "resource_table"
 
         # Create a batch with one entry
         slice_digest = sha256(b"test").digest()
         batch = [(1, {slice_digest: 100})]
 
-        result = _update_one_batch(mock_orm, batch, 100)
+        # Mock orm_execute to return (digest, resource_id) pairs
+        mock_orm.orm_execute.return_value = [(slice_digest, 100)]
 
-        # Should return the next available resource ID
-        assert result == 101
+        result = _update_one_batch(mock_orm, batch)
+
+        # Should return None
+        assert result is None
         # Should have called orm_insert_mappings
         mock_orm.orm_insert_mappings.assert_called_once()
+        # Should have called orm_execute to get slice->resource_id mapping
+        mock_orm.orm_execute.assert_called_once()
         # Should have called orm_update_entries_many
         mock_orm.orm_update_entries_many.assert_called_once()
 
     def test_update_one_batch_multiple_entries(self, mocker):
         """Test updating a batch with multiple entries."""
         mock_orm = mocker.MagicMock()
-        mock_orm.orm_select_entry.return_value = None
+        mock_orm.orm_table_name = "resource_table"
 
         # Create a batch with multiple entries
         slice_digest1 = sha256(b"test1").digest()
@@ -348,9 +334,17 @@ class TestUpdateOneBatch:
             (2, {slice_digest3: 200}),
         ]
 
-        result = _update_one_batch(mock_orm, batch, 1)
+        # Mock orm_execute to return (digest, resource_id) pairs
+        mock_orm.orm_execute.return_value = [
+            (slice_digest1, 1),
+            (slice_digest2, 2),
+            (slice_digest3, 3),
+        ]
 
-        # 3 new slices, starting from 1, so next should be 4
-        assert result == 4
+        result = _update_one_batch(mock_orm, batch)
+
+        # Should return None
+        assert result is None
         mock_orm.orm_insert_mappings.assert_called_once()
+        mock_orm.orm_execute.assert_called_once()
         mock_orm.orm_update_entries_many.assert_called_once()
