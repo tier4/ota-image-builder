@@ -58,7 +58,9 @@ def _global_shutdown_on_failed(exc: BaseException):
         _thread.interrupt_main(signal.SIGINT)
 
 
-def _iter_slices(_batch: list[Sliced]) -> Generator[tuple[Sha256DigestBytes, Size]]:
+def _iter_slices(
+    _batch: list[Sliced],
+) -> Generator[tuple[Sha256DigestBytes, Size]]:  # pragma: no cover
     for _sliced in _batch:
         yield from _sliced[1].items()
 

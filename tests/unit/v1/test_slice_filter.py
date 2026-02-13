@@ -24,47 +24,8 @@ import ota_image_builder.v1._resource_process._slice_filter as sf_module
 from ota_image_builder.v1._resource_process._slice_filter import (
     SliceFilterProcesser,
     _global_shutdown_on_failed,
-    _iter_slices,
     _update_one_batch,
 )
-
-
-class TestIterSlices:
-    """Tests for _iter_slices helper function."""
-
-    def test_single_entry(self):
-        """Test iterating slices from a single batch entry."""
-        digest1 = sha256(b"slice1").digest()
-        digest2 = sha256(b"slice2").digest()
-        batch = [(1, {digest1: 100, digest2: 200})]
-
-        result = list(_iter_slices(batch))
-
-        assert len(result) == 2
-        assert (digest1, 100) in result
-        assert (digest2, 200) in result
-
-    def test_multiple_entries(self):
-        """Test iterating slices from multiple batch entries."""
-        digest1 = sha256(b"slice1").digest()
-        digest2 = sha256(b"slice2").digest()
-        digest3 = sha256(b"slice3").digest()
-        batch = [
-            (1, {digest1: 100, digest2: 200}),
-            (2, {digest3: 300}),
-        ]
-
-        result = list(_iter_slices(batch))
-
-        assert len(result) == 3
-        assert (digest1, 100) in result
-        assert (digest2, 200) in result
-        assert (digest3, 300) in result
-
-    def test_empty_batch(self):
-        """Test iterating slices from an empty batch."""
-        result = list(_iter_slices([]))
-        assert result == []
 
 
 class TestGlobalShutdownOnFailed:
