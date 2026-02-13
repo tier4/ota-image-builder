@@ -222,10 +222,10 @@ class TestSliceFilterProcesser:
         mock_future = mocker.MagicMock(spec=Future)
         mock_future.exception.return_value = Exception("test error")
 
-        with mocker.patch.object(sf_module, "_thread"):
-            processor._task_done_cb(mock_future)
+        mocker.patch.object(sf_module, "_thread")
+        processor._task_done_cb(mock_future)
 
-            assert sf_module._global_interrupted is True
+        assert sf_module._global_interrupted is True
 
         # Reset global state
         sf_module._global_interrupted = False
