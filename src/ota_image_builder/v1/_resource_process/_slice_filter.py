@@ -20,12 +20,14 @@ import logging
 import signal
 import sqlite3
 import threading
+import typing
 from concurrent.futures import Future, ThreadPoolExecutor
 from hashlib import sha256
+from itertools import repeat
 from pathlib import Path
 from queue import Queue
 from threading import Semaphore
-from typing import NoReturn, TypeAlias
+from typing import Generator, NoReturn, TypeAlias
 
 from ota_image_libs._resource_filter import SliceFilter
 from ota_image_libs.v1.resource_table.db import ResourceTableDBHelper, ResourceTableORM
@@ -38,7 +40,6 @@ from ota_image_builder._common import func_call_with_se, human_readable_size
 from ota_image_builder._configs import cfg
 
 from ._common import ResourceID, Sha256DigestBytes, Size
-from ._db_utils import count_entries_in_table
 
 logger = logging.getLogger(__name__)
 
@@ -57,46 +58,41 @@ def _global_shutdown_on_failed(exc: BaseException):
         _thread.interrupt_main(signal.SIGINT)
 
 
-def _planning_rs_id(
-    rs_orm: ResourceTableORM, batch: list[Sliced], cur_rs_id: ResourceID
-) -> tuple[ResourceID, dict[Sha256DigestBytes, ResourceID]]:
-    """Plan the resource_id assignment for slices, with considering
-    the edge case of slice resource already presented in the db.
-
-    NOTE that currently we will do select for each slices, this might
-        be a performance penalty, but normally we will only have small
-        number of slices(less than 300 in autoware ECU), so not a big problem.
-    """
-    _res: dict[Sha256DigestBytes, ResourceID] = {}
-    for _, _slices in batch:
-        for _slice_digest in _slices:
-            if _selected := rs_orm.orm_select_entry(
-                ResourceTableManifestTypedDict(digest=_slice_digest)
-            ):
-                _res[_slice_digest] = _selected.resource_id
-            else:
-                _res[_slice_digest] = cur_rs_id
-                cur_rs_id += 1
-    return cur_rs_id, _res
+def _iter_slices(_batch: list[Sliced]) -> Generator[tuple[Sha256DigestBytes, Size]]:
+    for _sliced in _batch:
+        yield from _sliced[1].items()
 
 
-def _update_one_batch(
-    rs_orm: ResourceTableORM, batch: list[Sliced], cur_rs_id: ResourceID
-) -> int:
+def _update_one_batch(rs_orm: ResourceTableORM, batch: list[Sliced]) -> None:
     # NOTE: there is possibility that, one slice from file A might be
     #       the same of another slice from file B. We must handle this case!
     # NOTE: DO NOT overwrite already exists resources!
-    next_rs_id, _planning = _planning_rs_id(rs_orm, batch, cur_rs_id)
     rs_orm.orm_insert_mappings(
         (
-            ResourceTableManifestTypedDict(
-                resource_id=_planning[_digest], digest=_digest, size=_size
-            )
-            for _entry in batch
-            for _digest, _size in _entry[1].items()
+            ResourceTableManifestTypedDict(digest=_digest, size=_size)
+            for _digest, _size in _iter_slices(batch)
         ),
         or_option="ignore",
     )
+
+    # get the mapping of slices and resource_id
+    # NOTE: the len will be cfg.SLICE_UPDATE_BATCH_SIZE, which is small.
+    _slices = list(_iter_slices(batch))
+    # fmt: off
+    slices_entries: dict[Sha256DigestBytes, ResourceID] = dict(
+        rs_orm.orm_execute(
+            gen_sql_stmt(
+                "SELECT", "digest, resource_id",
+                "FROM", rs_orm.orm_table_name,
+                "WHERE", "digest", "IN", f"({','.join(repeat('?', len(_slices)))})"
+            ),
+            params=tuple(_slice[0] for _slice in _slices),
+            row_factory=typing.cast(
+                typing.Callable[..., tuple[Sha256DigestBytes, ResourceID]], sqlite3.Row
+            ),
+        )
+    )
+    # fmt: on
 
     # then update the sliced origin's filter_applied field
     rs_orm.orm_update_entries_many(
@@ -104,7 +100,7 @@ def _update_one_batch(
         set_cols_value=(
             ResourceTableManifestTypedDict(
                 filter_applied=SliceFilter(
-                    slices=[_planning[_digest] for _digest in _slices],
+                    slices=[slices_entries[_digest] for _digest in _slices],
                 )
             )
             for _, _slices in batch
@@ -115,7 +111,6 @@ def _update_one_batch(
             for _resource_id, _ in batch
         ),
     )
-    return next_rs_id
 
 
 class SliceFilterProcesser:
@@ -185,16 +180,15 @@ class SliceFilterProcesser:
 
     # ------------------------ #
 
-    def _update_db(self, rs_orm: ResourceTableORM, rs_id_start: ResourceID):
-        cur_rs_id = rs_id_start
+    def _update_db(self, rs_orm: ResourceTableORM):
         batch: list[Sliced] = []
         while _entry := self._slice_res_queue.get_nowait():
             batch.append(_entry)
             if len(batch) > self._update_batch:
-                cur_rs_id = _update_one_batch(rs_orm, batch, cur_rs_id)
+                _update_one_batch(rs_orm, batch)
                 batch.clear()
         if batch:
-            _update_one_batch(rs_orm, batch, cur_rs_id)
+            _update_one_batch(rs_orm, batch)
 
     def _do_slicing(self, rs_orm: ResourceTableORM) -> tuple[int, Size]:
         sliced_count, sliced_size = 0, 0
@@ -236,10 +230,7 @@ class SliceFilterProcesser:
     def process(self):
         with self._db_helper.get_orm() as rs_orm:
             sliced_count, sliced_size = self._do_slicing(rs_orm)
-
-            # NOTE: resource_id starts from 1
-            next_rs_id = count_entries_in_table(rs_orm) + 1
-            self._update_db(rs_orm, next_rs_id)
+            self._update_db(rs_orm)
 
         logger.info(
             f"slice_filter: total {sliced_count} files({human_readable_size(sliced_size)}) are sliced."
