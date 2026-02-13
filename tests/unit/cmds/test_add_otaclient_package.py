@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from argparse import Namespace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
+from pytest_mock import MockerFixture
 
 from ota_image_builder.cmds.add_otaclient_package import add_otaclient_package_cmd
 
@@ -40,7 +40,7 @@ class TestAddOtaclientPackageCmd:
         with pytest.raises(SystemExit):
             add_otaclient_package_cmd(args)
 
-    def test_nonexistent_release_dir_exits(self, tmp_path: Path):
+    def test_nonexistent_release_dir_exits(self, tmp_path: Path, mocker: MockerFixture):
         """Test that non-existent release directory causes SystemExit."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
@@ -51,14 +51,14 @@ class TestAddOtaclientPackageCmd:
             release_dir=str(release_dir),
         )
 
-        with patch(
+        mocker.patch(
             "ota_image_builder.cmds.add_otaclient_package.check_if_valid_ota_image",
             return_value=True,
-        ):
-            with pytest.raises(SystemExit):
-                add_otaclient_package_cmd(args)
+        )
+        with pytest.raises(SystemExit):
+            add_otaclient_package_cmd(args)
 
-    def test_success(self, tmp_path: Path):
+    def test_success(self, tmp_path: Path, mocker: MockerFixture):
         """Test successful adding of otaclient package."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
@@ -70,22 +70,25 @@ class TestAddOtaclientPackageCmd:
             release_dir=str(release_dir),
         )
 
-        with patch(
+        mocker.patch(
             "ota_image_builder.cmds.add_otaclient_package.check_if_valid_ota_image",
             return_value=True,
-        ):
-            with patch(
-                "ota_image_builder.cmds.add_otaclient_package.ImageIndexHelper"
-            ) as mock_helper_class:
-                mock_helper = MagicMock()
-                mock_helper_class.return_value = mock_helper
+        )
+        mock_helper_class = mocker.patch(
+            "ota_image_builder.cmds.add_otaclient_package.ImageIndexHelper"
+        )
+        mock_helper = mocker.MagicMock()
+        mock_helper.image_index.image_finalized = False
+        mock_helper.image_index.image_signed = False
+        mock_helper.image_index.find_otaclient_package.return_value = None
+        mock_helper_class.return_value = mock_helper
 
-                with patch(
-                    "ota_image_builder.cmds.add_otaclient_package.add_otaclient_package"
-                ) as mock_add:
-                    mock_add.return_value = MagicMock()
+        mock_add = mocker.patch(
+            "ota_image_builder.cmds.add_otaclient_package.add_otaclient_package"
+        )
+        mock_add.return_value = mocker.MagicMock()
 
-                    add_otaclient_package_cmd(args)
+        add_otaclient_package_cmd(args)
 
-                    mock_helper.sync_index.assert_called_once()
-                    mock_add.assert_called_once()
+        mock_helper.sync_index.assert_called_once()
+        mock_add.assert_called_once()
