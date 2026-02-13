@@ -178,12 +178,16 @@ class CompressionFilterProcesser:
     def _update_db(self, compressed: CompressionResult):
         rs_orm = self._db_helper.get_orm()
         with contextlib.closing(rs_orm.orm_con):
+            # NOTE: DO NOT overwrite the already there resources if any!
             rs_orm.orm_insert_mappings(
-                ResourceTableManifestTypedDict(
-                    digest=compressed_digest,
-                    size=compressed_size,
-                )
-                for compressed_digest, compressed_size in compressed.values()
+                (
+                    ResourceTableManifestTypedDict(
+                        digest=compressed_digest,
+                        size=compressed_size,
+                    )
+                    for compressed_digest, compressed_size in compressed.values()
+                ),
+                or_option="ignore",
             )
 
             for origin_rs_id, (compressed_digest, _) in compressed.items():
