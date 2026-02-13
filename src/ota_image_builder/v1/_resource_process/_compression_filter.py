@@ -23,8 +23,8 @@ import sqlite3
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from hashlib import sha256
-from itertools import count
 from pathlib import Path
+from typing import TypeAlias
 
 import zstandard
 from ota_image_libs._resource_filter import CompressFilter
@@ -43,11 +43,14 @@ from ota_image_builder._common import (
 )
 from ota_image_builder._configs import cfg
 
-from ._db_utils import count_entries_in_table
-
 logger = logging.getLogger(__name__)
 
 _global_shutdown = False
+
+ResourceID: TypeAlias = int
+Sha256DigestBytes: TypeAlias = bytes
+Size: TypeAlias = int
+CompressionResult = WriteThreadSafeDict[ResourceID, tuple[Sha256DigestBytes, Size]]
 
 
 class CompressionFilterProcesser:
@@ -77,11 +80,6 @@ class CompressionFilterProcesser:
         self._worker_threads = worker_threads
         self._se = threading.Semaphore(concurrent_jobs)
 
-        # <origin_rs_id>, (<compressed_digest>, <compressed_size>)
-        self._compressed: WriteThreadSafeDict[int, tuple[bytes, int]] = (
-            WriteThreadSafeDict()
-        )
-
     def _thread_worker_initializer(self) -> None:
         thread_local = self._worker_thread_local
         thread_local.cctx = zstandard.ZstdCompressor(
@@ -108,8 +106,12 @@ class CompressionFilterProcesser:
                 dst_f.write(compressed_chunk)
         return hasher.digest(), compressed_size
 
-    def _process_one_entry_at_thread(self, _row: tuple[int, bytes, int]) -> None:
-        resource_id, origin_digest, origin_size = _row
+    def _process_one_entry_at_thread(
+        self,
+        row: tuple[int, bytes, int],
+        compressed: WriteThreadSafeDict[int, tuple[bytes, int]],
+    ) -> None:
+        resource_id, origin_digest, origin_size = row
         origin_resource = self._resource_dir / origin_digest.hex()
 
         _tmp_compressed = self._resource_dir / tmp_fname(origin_digest.hex())
@@ -122,7 +124,7 @@ class CompressionFilterProcesser:
                     _tmp_compressed, self._resource_dir / compressed_digest.hex()
                 )
                 origin_resource.unlink(missing_ok=True)
-                self._compressed[resource_id] = compressed_digest, compressed_size
+                compressed[resource_id] = compressed_digest, compressed_size
         finally:
             _tmp_compressed.unlink(missing_ok=True)
 
@@ -139,76 +141,78 @@ class CompressionFilterProcesser:
                 _global_shutdown = True
                 _thread.interrupt_main()
 
-    def process(self) -> None:
-        rs_orm = self._db_helper.get_orm()
-        with contextlib.closing(rs_orm.orm_con):
-            _table_name = rs_orm.orm_table_name
-            origin_size = 0
+    def _process_compression(self) -> tuple[int, CompressionResult]:
+        origin_size, compressed = 0, CompressionResult()
 
-            _stmt = ResourceTableManifest.table_select_stmt(
-                select_from=_table_name,
-                select_cols=("resource_id", "digest", "size"),
-                where_stmt=f"WHERE size > {self._lower_bound} AND filter_applied IS NULL",
-            )
-            with ThreadPoolExecutor(
+        rs_orm = self._db_helper.get_orm()
+        with (
+            contextlib.closing(rs_orm.orm_con),
+            ThreadPoolExecutor(
                 initializer=self._thread_worker_initializer,
                 max_workers=self._worker_threads,
                 thread_name_prefix="ota_image_builder",
-            ) as pool:
-                submit_with_se = func_call_with_se(pool.submit, self._se)
-                for _raw_row in rs_orm.orm_select_entries(
-                    _stmt=_stmt, _row_factory=sqlite3.Row
-                ):
-                    if _raw_row[1] in self._protected_resources:
-                        continue
+            ) as pool,
+        ):
+            _stmt = ResourceTableManifest.table_select_stmt(
+                select_from=rs_orm.orm_table_name,
+                select_cols=("resource_id", "digest", "size"),
+                where_stmt=f"WHERE size > {self._lower_bound} AND filter_applied IS NULL",
+            )
 
-                    origin_size += _raw_row[-1]
-                    submit_with_se(
-                        self._process_one_entry_at_thread,
-                        _raw_row,  # type: ignore
-                    ).add_done_callback(self._task_done_cb)
+            submit_with_se = func_call_with_se(pool.submit, self._se)
+            for _raw_row in rs_orm.orm_select_entries(
+                _stmt=_stmt, _row_factory=sqlite3.Row
+            ):
+                if _raw_row[1] in self._protected_resources:
+                    continue
 
-            # ------ update database ------ #
-            # insert the newly added resources
-            # NOTE: resource_id is 1to1 mapping to original resource, so we have two the count instances here.
-            # NOTE: resource_id starts from 1
-            next_rs_id1 = count(start=count_entries_in_table(rs_orm) + 1)
-            next_rs_id2 = count(start=count_entries_in_table(rs_orm) + 1)
+                origin_size += _raw_row[-1]
+                submit_with_se(
+                    self._process_one_entry_at_thread,
+                    _raw_row,  # type: ignore
+                    compressed,
+                ).add_done_callback(self._task_done_cb)
 
+        return origin_size, compressed
+
+    def _update_db(self, compressed: CompressionResult):
+        rs_orm = self._db_helper.get_orm()
+        with contextlib.closing(rs_orm.orm_con):
             rs_orm.orm_insert_mappings(
                 ResourceTableManifestTypedDict(
-                    resource_id=_next_id,
                     digest=compressed_digest,
                     size=compressed_size,
                 )
-                for _next_id, (compressed_digest, compressed_size) in zip(
-                    next_rs_id1, self._compressed.values(), strict=False
-                )
+                for compressed_digest, compressed_size in compressed.values()
             )
 
-            # update the origianl resources that being compressed
-            rs_orm.orm_update_entries_many(
-                set_cols=("filter_applied",),
-                set_cols_value=(
-                    ResourceTableManifestTypedDict(
+            for origin_rs_id, (compressed_digest, _) in compressed.items():
+                # look up the compressed entry
+                _compressed_entry = rs_orm.orm_select_entry(
+                    ResourceTableManifestTypedDict(digest=compressed_digest)
+                )
+
+                # update the origin entry
+                rs_orm.orm_update_entries(
+                    set_values=ResourceTableManifestTypedDict(
                         filter_applied=CompressFilter(
-                            resource_id=_next_rs_id,
+                            resource_id=_compressed_entry.resource_id,
                             compression_alg=ZSTD_COMPRESSION_ALG,
                         )
-                    )
-                    for _next_rs_id in next_rs_id2
-                ),
-                where_cols=("resource_id",),
-                where_cols_value=(
-                    ResourceTableManifestTypedDict(resource_id=_resource_id)
-                    for _resource_id in self._compressed
-                ),
-            )
+                    ),
+                    where_cols_value=ResourceTableManifestTypedDict(
+                        resource_id=origin_rs_id
+                    ),
+                )
 
-            compressed = len(self._compressed)
-            compressed_size = sum(_size for _, _size in self._compressed.values())
-            logger.info(
-                f"compression_filter: total {compressed} files are compressed"
-                f"(original size: {human_readable_size(origin_size)}, "
-                f"compressed size: {human_readable_size(compressed_size)})"
-            )
+    def process(self) -> None:
+        origin_size, _compressed = self._process_compression()
+        self._update_db(_compressed)
+
+        compressed = len(_compressed)
+        compressed_size = sum(_size for _, _size in _compressed.values())
+        logger.info(
+            f"compression_filter: total {compressed} files are compressed"
+            f"(original size: {human_readable_size(origin_size)}, "
+            f"compressed size: {human_readable_size(compressed_size)})"
+        )
