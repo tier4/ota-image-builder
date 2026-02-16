@@ -19,7 +19,8 @@ echo "------------ prepare the input system image ------------"
 ${BUILDER} -d prepare-sysimg \
     --rootfs-dir ${SYS_IMG_ROOTFS}
 
-# NOTE: Order of calling cmds matters!
+# NOTE: Order of calling cmds matters! This re-assembles the implementation
+#   at the evaluator side:
 #   prepare-sysimg -> add-otaclient-package -> add-image
 
 echo "------------ add otaclient package into OTA image ------------"
