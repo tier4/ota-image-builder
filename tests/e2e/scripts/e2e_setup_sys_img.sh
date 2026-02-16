@@ -40,6 +40,12 @@ for i in $(seq 1 ${EMPTY_FILE_COUNT}); do
 done
 set -x
 
+# ------ hardlink files support ------ #
+HARDLINK_FILE=/var/hardlinked_file
+echo "ahardlinkedfile" > ${HARDLINK_FILE}
+ln ${HARDLINK_FILE} "${HARDLINK_FILE}_1"
+ln ${HARDLINK_FILE} "${HARDLINK_FILE}_2"
+
 # ------ small files ------ #
 SMALL_FILES_COUNT=10000
 SMALL_FILES_FOLDER=/var/small_files

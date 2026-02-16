@@ -41,6 +41,7 @@ class FileInfo:
     file_type: int
     uid: int
     gid: int
+    nlink: int
     xattrs: tuple[tuple[str, bytes], ...]
     sha256digest: Optional[str] = None
     symlinktarget: Optional[str] = None
@@ -72,6 +73,7 @@ def get_file_info(path: Path) -> FileInfo:
         file_type=stat.S_IFMT(st_mode),
         uid=st.st_uid,
         gid=st.st_gid,
+        nlink=st.st_nlink,
         xattrs=get_xattrs(path),
         sha256digest=sha256digest,
         symlinktarget=symlink_target,
