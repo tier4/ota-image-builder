@@ -18,12 +18,12 @@ curl -LO --output-dir "${OTACLIENT_RELEASE_DIR}" "${BASE_URL}/otaclient-arm64-v3
 curl -LO --output-dir "${OTACLIENT_RELEASE_DIR}" "${BASE_URL}/otaclient-x86_64-v3.13.1.squashfs"
 
 # ------ files with same contents ------ #
-SMALL_SAME_FILE=/small_same_file
+SMALL_SAME_FILE=/var/small_same_file
 dd if=/dev/urandom of=${SMALL_SAME_FILE} bs=1k count=2
 cp ${SMALL_SAME_FILE} "${SMALL_SAME_FILE}_1"
 cp ${SMALL_SAME_FILE} "${SMALL_SAME_FILE}_2"
 
-LARGE_SAME_FILE=/large_same_file
+LARGE_SAME_FILE=/var/large_same_file
 dd if=/dev/urandom of=${LARGE_SAME_FILE} bs=1M count=30
 cp ${LARGE_SAME_FILE} "${LARGE_SAME_FILE}_1"
 cp ${LARGE_SAME_FILE} "${LARGE_SAME_FILE}_2"
@@ -31,7 +31,7 @@ cp ${LARGE_SAME_FILE} "${LARGE_SAME_FILE}_2"
 # ------ empty files ------ #
 # for otaclient PR#492, add a folder that contains lots of empty files
 EMPTY_FILE_COUNT=5000
-EMPTY_FILE_FOLDER=/empty_files
+EMPTY_FILE_FOLDER=/var/empty_files
 
 set +x
 mkdir ${EMPTY_FILE_FOLDER}
@@ -42,7 +42,7 @@ set -x
 
 # ------ small files ------ #
 SMALL_FILES_COUNT=10000
-SMALL_FILES_FOLDER=/small_files
+SMALL_FILES_FOLDER=/var/small_files
 
 set +x
 mkdir ${SMALL_FILES_FOLDER}
@@ -51,14 +51,15 @@ for i in $(seq 1 ${SMALL_FILES_COUNT}); do
 done
 set -x
 
-chown -R 1000:42 /small_files
+chown -R 1000:42 ${SMALL_FILES_FOLDER}
 
 # ------ xattrs support ------ #
-touch /file_with_xattrs
-setfattr -n user.ota.test -v "test_value" /file_with_xattrs
+FILE_WITH_XATTRS=/var/file_with_xattrs
+touch ${FILE_WITH_XATTRS}
+setfattr -n user.ota.test -v "test_value" ${FILE_WITH_XATTRS}
 
 # ------ large file support ------ #
-dd if=/dev/urandom of=/500M.img bs=1M count=500
+dd if=/dev/urandom of=/var/500M.img bs=1M count=500
 
 # ------ utf-8 support ------ #
 SPECIAL_FILE="path;adf.ae?qu.er\y=str#fragファイルement"
