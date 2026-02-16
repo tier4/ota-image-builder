@@ -143,6 +143,7 @@ class SystemImageProcesser:
                 uid=f_stat.st_uid,
                 gid=f_stat.st_gid,
                 mode=f_stat.st_mode,
+                links_count=f_stat.st_nlink,
                 xattrs=xattrs or None,
             )
         )
