@@ -193,7 +193,7 @@ class SliceFilterProcesser:
             for batch in batched(sliced, self._update_batch, strict=False):
                 _update_one_batch(rs_orm, batch)
 
-    def _do_slicing(self) -> tuple[int, Size, SliceResult]:
+    def _process_slicing(self) -> tuple[int, Size, SliceResult]:
         sliced_count, sliced_size = 0, 0
         slice_result = SliceResult()
 
@@ -233,7 +233,7 @@ class SliceFilterProcesser:
         return sliced_count, sliced_size, slice_result
 
     def process(self):
-        sliced_count, sliced_size, slice_result = self._do_slicing()
+        sliced_count, sliced_size, slice_result = self._process_slicing()
         self._update_db(slice_result)
 
         logger.info(

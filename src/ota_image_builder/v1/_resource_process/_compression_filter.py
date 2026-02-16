@@ -230,6 +230,8 @@ class CompressionFilterProcesser:
 
     def process(self) -> None:
         origin_size, _compressed = self._process_compression()
+
+        logger.info("Compression processing finished, start to update database ...")
         self._update_db(_compressed)
 
         compressed = len(_compressed)
