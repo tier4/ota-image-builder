@@ -250,10 +250,9 @@ class BundleFilterProcesser:
         self._bundle_blob_size = bundle_blob_size
         self._bundle_compressed_max_sum = bundle_compressed_max_sum
 
-    def process(self):
+    def _process_bundle(self) -> list[tuple[BundleResult, BundleCompressedResult]]:
         with self._db_helper.get_orm() as rs_orm:
             _table_name, _table_spec = rs_orm.orm_table_name, rs_orm.orm_table_spec
-
             #
             # ------ processing entries and generating bundles ------ #
             #
@@ -289,7 +288,7 @@ class BundleFilterProcesser:
             total_bundled_f_count = 0
             total_bundled_f_size = 0
 
-            bundle_results: list[tuple[BundleResult, BundleCompressedResult]] = []
+            bundle_result: list[tuple[BundleResult, BundleCompressedResult]] = []
 
             for _batch in batch_gen:
                 if compressed_bundle_size > self._bundle_compressed_max_sum:
@@ -316,22 +315,27 @@ class BundleFilterProcesser:
                     f"bundle size: {human_readable_size(_bundle_res.bundle_size)}.\n"
                     f"bundle compressed size: {human_readable_size(_compress_res.compressed_size)}"
                 )
-                bundle_results.append((_bundle_res, _compress_res))
-
-            logger.info("all bundles are generated, start to update database ...")
+                bundle_result.append((_bundle_res, _compress_res))
 
             # finalize the query as we need to do db update next
             with contextlib.suppress(Exception):
                 entries_to_bundle_gen.throw(StopIteration)
 
-            #
-            # ------ update database ------ #
-            #
-            # NOTE: resource_id starts from 1
-            # NOTE: we cannot execute sqlite3 query when previous query hasn't finished,
-            #       so we pre-calculate the next_rs_id here.
+        logger.info(
+            (
+                f"bundle_filter: total {total_bundled_f_count} files({human_readable_size(total_bundled_f_size)}) are bundled.\n"
+                f"{bundle_blobs_count} bundle blobs are created.\n"
+                f"bundles blobs are compressed to {human_readable_size(compressed_bundle_size)} with zstd."
+            )
+        )
+        return bundle_result
+
+    def _update_db(
+        self, bundle_result: list[tuple[BundleResult, BundleCompressedResult]]
+    ) -> None:
+        with self._db_helper.get_orm() as rs_orm:
             next_rs_id = count_entries_in_table(rs_orm) + 1
-            for _bundle_res, _compress_res in bundle_results:
+            for _bundle_res, _compress_res in bundle_result:
                 next_rs_id = _commit_one_bundle(
                     next_rs_id=next_rs_id,
                     bundle_res=_bundle_res,
@@ -339,11 +343,8 @@ class BundleFilterProcesser:
                     rs_orm=rs_orm,
                 )
 
-            logger.info(
-                (
-                    f"bundle_filter: total {total_bundled_f_count} files({human_readable_size(total_bundled_f_size)}) are bundled.\n"
-                    f"{bundle_blobs_count} bundle blobs are created.\n"
-                    f"bundles blobs are compressed to {human_readable_size(compressed_bundle_size)} with zstd."
-                )
-            )
-            logger.info(f"next_rs_id: {count_entries_in_table(rs_orm) + 1}")
+    def process(self) -> None:
+        bundle_result = self._process_bundle()
+
+        logger.info("all bundles are generated, start to update database ...")
+        self._update_db(bundle_result)
