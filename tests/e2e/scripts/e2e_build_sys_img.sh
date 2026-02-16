@@ -17,7 +17,9 @@ cp ${SETUP_SCRIPT} ${ROOTFS}
 # ------ use podman to setup the exported system image ------ #
 podman run -d --replace --name setup_dind --privileged \
     --rootfs "$(realpath ${ROOTFS})" /usr/local/bin/dockerd-entrypoint.sh
+
 # Wait for dockerd inside the container to fully start up
+set +x
 max_wait_seconds=30
 elapsed=0
 until podman exec setup_dind docker info >/dev/null 2>&1; do
@@ -28,6 +30,7 @@ until podman exec setup_dind docker info >/dev/null 2>&1; do
     sleep 1
     elapsed=$((elapsed + 1))
 done
+set -x
 
 podman exec setup_dind /e2e_setup_sys_img.sh
 podman stop setup_dind
