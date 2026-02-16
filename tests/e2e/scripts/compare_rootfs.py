@@ -41,8 +41,8 @@ class FileInfo:
     file_type: int
     uid: int
     gid: int
-    nlink: int
     xattrs: tuple[tuple[str, bytes], ...]
+    nlink: Optional[int] = None
     sha256digest: Optional[str] = None
     symlinktarget: Optional[str] = None
 
@@ -57,12 +57,14 @@ def get_file_info(path: Path) -> FileInfo:
     st_mode = st.st_mode
 
     sha256digest = None
+    nlink = None
     if stat.S_ISREG(st_mode):
         _hasher = sha256()
         with open(path, "rb") as _src:
             while chunk := _src.read(READ_SIZE):
                 _hasher.update(chunk)
         sha256digest = _hasher.hexdigest()
+        nlink = st.st_nlink
 
     symlink_target = None
     if stat.S_ISLNK(st_mode):
@@ -73,7 +75,7 @@ def get_file_info(path: Path) -> FileInfo:
         file_type=stat.S_IFMT(st_mode),
         uid=st.st_uid,
         gid=st.st_gid,
-        nlink=st.st_nlink,
+        nlink=nlink,
         xattrs=get_xattrs(path),
         sha256digest=sha256digest,
         symlinktarget=symlink_target,
