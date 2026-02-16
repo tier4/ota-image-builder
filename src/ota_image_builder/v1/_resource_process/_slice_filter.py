@@ -23,11 +23,10 @@ import threading
 import typing
 from concurrent.futures import Future, ThreadPoolExecutor
 from hashlib import sha256
-from itertools import repeat
+from itertools import batched, repeat
 from pathlib import Path
-from queue import Queue
 from threading import Semaphore
-from typing import Generator, NoReturn, TypeAlias
+from typing import Generator, Iterable, NoReturn
 
 from ota_image_libs._resource_filter import SliceFilter
 from ota_image_libs.v1.resource_table.db import ResourceTableDBHelper, ResourceTableORM
@@ -36,7 +35,11 @@ from ota_image_libs.v1.resource_table.schema import (
 )
 from simple_sqlite3_orm import gen_sql_stmt
 
-from ota_image_builder._common import func_call_with_se, human_readable_size
+from ota_image_builder._common import (
+    WriteThreadSafeList,
+    func_call_with_se,
+    human_readable_size,
+)
 from ota_image_builder._configs import cfg
 
 from ._common import ResourceID, Sha256DigestBytes, Size
@@ -45,7 +48,8 @@ logger = logging.getLogger(__name__)
 
 _global_interrupted = False
 
-Sliced: TypeAlias = tuple[ResourceID, dict[Sha256DigestBytes, Size]]
+Sliced = tuple[ResourceID, dict[Sha256DigestBytes, Size]]
+SliceResult = WriteThreadSafeList[Sliced]
 """<original_rs_id>, dict[<slice_digest>, <slice_size>]."""
 
 
@@ -59,13 +63,13 @@ def _global_shutdown_on_failed(exc: BaseException):
 
 
 def _iter_slices(
-    _batch: list[Sliced],
+    _batch: Iterable[Sliced],
 ) -> Generator[tuple[Sha256DigestBytes, Size]]:  # pragma: no cover
     for _sliced in _batch:
         yield from _sliced[1].items()
 
 
-def _update_one_batch(rs_orm: ResourceTableORM, batch: list[Sliced]) -> None:
+def _update_one_batch(rs_orm: ResourceTableORM, batch: Iterable[Sliced]) -> None:
     # NOTE: there is possibility that, one slice from file A might be
     #       the same of another slice from file B. We must handle this case!
     # NOTE: DO NOT overwrite already exists resources!
@@ -142,8 +146,6 @@ class SliceFilterProcesser:
         self._max_slice_size = max_slice_size
         self._thread_local = threading.local()
 
-        self._slice_res_queue: Queue[Sliced | None] = Queue()
-
     def _thread_worker_initializer(self) -> None:
         _thread_local = self._thread_local
         _thread_local.buffer = buffer = bytearray(self._max_slice_size)
@@ -156,8 +158,12 @@ class SliceFilterProcesser:
             _global_shutdown_on_failed(exc)
 
     def _process_one_origin_at_thread(
-        self, resource_id: ResourceID, entry_digest: Sha256DigestBytes, entry_size: Size
-    ):
+        self,
+        resource_id: ResourceID,
+        entry_digest: Sha256DigestBytes,
+        entry_size: Size,
+        sliced: SliceResult,
+    ) -> None:
         _thread_local = self._thread_local
         _buffer, _buffer_view = _thread_local.buffer, _thread_local.bufferview
         slices: dict[Sha256DigestBytes, Size] = {}
@@ -178,34 +184,32 @@ class SliceFilterProcesser:
                 entry_size -= _process_chunk()
             _process_chunk()  # read final chunk of data
         entry_fpath.unlink(missing_ok=True)  # finally, remove the original resource
-        self._slice_res_queue.put_nowait((resource_id, slices))
+        sliced.append((resource_id, slices))
 
     # ------------------------ #
 
-    def _update_db(self, rs_orm: ResourceTableORM):
-        batch: list[Sliced] = []
-        while _entry := self._slice_res_queue.get_nowait():
-            batch.append(_entry)
-            if len(batch) > self._update_batch:
+    def _update_db(self, sliced: SliceResult) -> None:
+        with self._db_helper.get_orm() as rs_orm:
+            for batch in batched(sliced, self._update_batch, strict=False):
                 _update_one_batch(rs_orm, batch)
-                batch.clear()
-        if batch:
-            _update_one_batch(rs_orm, batch)
 
-    def _do_slicing(self, rs_orm: ResourceTableORM) -> tuple[int, Size]:
+    def _do_slicing(self) -> tuple[int, Size, SliceResult]:
         sliced_count, sliced_size = 0, 0
-        _table_name = rs_orm.orm_table_name
+        slice_result = SliceResult()
 
-        with ThreadPoolExecutor(
-            max_workers=self._worker_threads,
-            thread_name_prefix="slice_filter",
-            initializer=self._thread_worker_initializer,
-        ) as pool:
+        with (
+            self._db_helper.get_orm() as rs_orm,
+            ThreadPoolExecutor(
+                max_workers=self._worker_threads,
+                thread_name_prefix="slice_filter",
+                initializer=self._thread_worker_initializer,
+            ) as pool,
+        ):
             submit_with_se = func_call_with_se(pool.submit, self._se)
             # fmt: off
             for _row in rs_orm.orm_select_entries(
                 _stmt=rs_orm.orm_table_spec.table_select_stmt(
-                    select_from=_table_name,
+                    select_from=rs_orm.orm_table_name,
                     select_cols=("resource_id", "digest", "size"),
                     where_stmt=gen_sql_stmt(
                         "WHERE","size", ">", f"{self._lower_bound}",
@@ -223,16 +227,14 @@ class SliceFilterProcesser:
                 sliced_size += entry_size
 
                 submit_with_se(self._process_one_origin_at_thread,
-                    resource_id, entry_digest, entry_size
+                    resource_id, entry_digest, entry_size, slice_result
                 ).add_done_callback(self._task_done_cb)
             # fmt: on
-        self._slice_res_queue.put_nowait(None)
-        return sliced_count, sliced_size
+        return sliced_count, sliced_size, slice_result
 
     def process(self):
-        with self._db_helper.get_orm() as rs_orm:
-            sliced_count, sliced_size = self._do_slicing(rs_orm)
-            self._update_db(rs_orm)
+        sliced_count, sliced_size, slice_result = self._do_slicing()
+        self._update_db(slice_result)
 
         logger.info(
             f"slice_filter: total {sliced_count} files({human_readable_size(sliced_size)}) are sliced."
