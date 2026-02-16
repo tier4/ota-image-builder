@@ -23,6 +23,7 @@ from pathlib import Path
 import ota_image_builder.v1._resource_process._slice_filter as sf_module
 from ota_image_builder.v1._resource_process._slice_filter import (
     SliceFilterProcesser,
+    SliceResult,
     _global_shutdown_on_failed,
     _update_one_batch,
 )
@@ -201,14 +202,17 @@ class TestSliceFilterProcesser:
 
         # Process the file
         resource_id = 1
-        processor._process_one_origin_at_thread(resource_id, test_digest, len(content))
+        slice_result = SliceResult()
+        processor._process_one_origin_at_thread(
+            resource_id, test_digest, len(content), slice_result
+        )
 
         # Original file should be deleted
         assert not test_file.exists()
 
         # Sliced files should exist
-        result = processor._slice_res_queue.get_nowait()
-        assert result is not None
+        assert len(slice_result) == 1
+        result = slice_result[0]
         assert result[0] == resource_id
         assert len(result[1]) >= 2  # Should have multiple slices
 
