@@ -53,7 +53,7 @@ _global_shutdown = False
 
 CompressionResult = WriteThreadSafeDict[ResourceID, tuple[Sha256DigestBytes, Size]]
 
-QUERY_BATCH_SIZE = 32
+QUERY_BATCH_SIZE = 128
 
 
 class CompressionFilterProcesser:
