@@ -99,7 +99,7 @@ def _generate_one_bundle(
     *,
     resource_dir: Path,
     cctx: zstandard.ZstdCompressor,
-) -> tuple[BundleResult, BundleCompressedResult] | None:
+) -> tuple[BundleResult, BundleCompressedResult]:
     bundle_size, entries = entries_to_bundle
 
     _bundled_entries = BundledEntries()
@@ -289,20 +289,15 @@ class BundleFilterProcesser:
             total_bundled_f_size = 0
 
             bundle_result: list[tuple[BundleResult, BundleCompressedResult]] = []
-
             for _batch in batch_gen:
                 if compressed_bundle_size > self._bundle_compressed_max_sum:
                     break
 
-                _res = _generate_one_bundle(
+                _bundle_res, _compress_res = _generate_one_bundle(
                     _batch,
                     resource_dir=self._resource_dir,
                     cctx=cctx,
                 )
-                if not _res:
-                    break  # no bundle is created
-
-                _bundle_res, _compress_res = _res
 
                 compressed_bundle_size += _compress_res.compressed_size
                 total_bundled_f_count += len(_bundle_res.bundled_entries)
