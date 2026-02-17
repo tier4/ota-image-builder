@@ -48,7 +48,7 @@ _multiplier: dict[_MultiUnits, int] = {
 logger = logging.getLogger(__name__)
 
 
-class WriteThreadSafeDict(dict[KT, VT]):
+class WriteThreadSafeDict(dict[KT, VT]):  # pragma: no cover
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._lock = threading.Lock()
@@ -56,6 +56,16 @@ class WriteThreadSafeDict(dict[KT, VT]):
     def __setitem__(self, key, value) -> None:
         with self._lock:
             return super().__setitem__(key, value)
+
+
+class WriteThreadSafeList(list[VT]):  # pragma: no cover
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._lock = threading.Lock()
+
+    def append(self, obj: VT) -> None:
+        with self._lock:
+            return super().append(obj)
 
 
 def human_readable_size(_in: int) -> str:

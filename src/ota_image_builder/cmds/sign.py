@@ -27,7 +27,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from cryptography.x509 import load_pem_x509_certificate
-from ota_image_libs._crypto.x509_utils import X509CertChain
+from ota_image_libs._crypto.x509_utils import X5cX509CertChain
 from ota_image_libs.v1.consts import INDEX_JWT_FNAME
 from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 from ota_image_libs.v1.index_jwt.utils import compose_index_jwt
@@ -42,8 +42,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def load_cert_chains(ee_fpath: Path, ca_fpaths: list[Path]) -> X509CertChain:
-    _res = X509CertChain()
+def load_cert_chains(ee_fpath: Path, ca_fpaths: list[Path]) -> X5cX509CertChain:
+    _res = X5cX509CertChain()
     _res.add_ee(load_pem_x509_certificate(ee_fpath.read_bytes()))
     if ca_fpaths:
         _res.add_interms(
@@ -55,7 +55,7 @@ def load_cert_chains(ee_fpath: Path, ca_fpaths: list[Path]) -> X509CertChain:
 def sign_image(
     image_root: Path,
     *,
-    sign_cert_chain: X509CertChain,
+    sign_cert_chain: X5cX509CertChain,
     sign_key: bytes,
     force_sign: bool,
     sign_key_passwd: bytes | None = None,

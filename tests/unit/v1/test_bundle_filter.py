@@ -98,25 +98,29 @@ class TestBatchEntriesWithFilter:
 
     def test_batches_entries_correctly(self):
         """Test that entries are batched by size."""
+        # We need enough entries in the final batch to pass the
+        # min_bundled_files threshold (default=128).
+        # Use 300 entries of size 10 each with expected_bundle_size=1000.
+        # Batches: [101 entries (1010)], [101 entries (1010)], [98 entries (980)].
+        # But 98 < 128 so the last batch is dropped.
+        # Instead use min_bundled_files=1 to test pure batching logic.
 
         def gen_entries():
-            yield EntryToBeBundled(1, b"d1", 100)
-            yield EntryToBeBundled(2, b"d2", 100)
-            yield EntryToBeBundled(3, b"d3", 100)
-            yield EntryToBeBundled(4, b"d4", 100)
-            yield EntryToBeBundled(5, b"d5", 100)
+            for i in range(5):
+                yield EntryToBeBundled(i, f"d{i}".encode(), 100)
 
         batches = list(
             _batch_entries_with_filter(
                 gen_entries(),
                 expected_bundle_size=250,
+                min_bundled_files=1,
                 excluded_resources=set(),
             )
         )
 
         # With batch size 250 and entries of 100 each,
         # first batch should have 3 entries (300 > 250)
-        # second batch should have 2 entries (200) but only if > min_bundle_ratio * 250 = 25
+        # second batch should have 2 entries (>= min_bundled_files=1)
         assert len(batches) == 2
         assert batches[0][0] == 300  # total size
         assert len(batches[0][1]) == 3  # 3 entries
@@ -162,8 +166,8 @@ class TestBatchEntriesWithFilter:
 
         assert len(batches) == 0
 
-    def test_min_bundle_ratio_filters_small_batches(self):
-        """Test that small final batches are filtered by min_bundle_ratio."""
+    def test_min_bundled_files_filters_small_batches(self):
+        """Test that small final batches are filtered by min_bundled_files."""
 
         def gen_entries():
             yield EntryToBeBundled(1, b"d1", 100)
@@ -174,13 +178,13 @@ class TestBatchEntriesWithFilter:
             _batch_entries_with_filter(
                 gen_entries(),
                 expected_bundle_size=150,
-                min_bundle_ratio=0.5,  # Need at least 75 bytes
+                min_bundled_files=2,  # Need at least 2 files in a batch
                 excluded_resources=set(),
             )
         )
 
-        # First batch: 200 bytes (2 entries)
-        # Remaining: 10 bytes, which is < 150 * 0.5 = 75, so filtered out
+        # First batch: 200 bytes (2 entries, hits > 150 threshold)
+        # Remaining: 1 entry (10 bytes), but 1 < min_bundled_files=2, so filtered out
         assert len(batches) == 1
         assert len(batches[0][1]) == 2
 

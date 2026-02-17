@@ -38,44 +38,45 @@ from simple_sqlite3_orm.utils import wrap_value
 
 from ota_image_builder._common import human_readable_size
 from ota_image_builder._configs import cfg
-from ota_image_builder.v1._resource_process._db_utils import count_entries_in_table
+
+from ._common import ResourceID, Sha256DigestBytes, Size
+from ._db_utils import count_entries_in_table
 
 logger = logging.getLogger(__name__)
 
-# If the bundle is smaller than 3MiB, we don't
-#   create bundle from it.
-MINIMUM_BUNDLE_SIZE_RATIO = 0.1
+MINIMUM_FILES_IN_BUNDLE = 128
+"""Do not create bundle if the bundle contains less than 128 files."""
 
-BundledEntries = dict[tuple[int, bytes], tuple[int, int]]
+BundledEntries = dict[tuple[ResourceID, Sha256DigestBytes], tuple[int, int]]
 """
 (origin_rs_id, origin_digest), (offset, len)
 """
 
 
 class EntryToBeBundled(NamedTuple):
-    resource_id: int
-    digest: bytes
-    size: int
+    resource_id: ResourceID
+    digest: Sha256DigestBytes
+    size: Size
 
 
 class BundleResult(NamedTuple):
-    bundle_digest: bytes
-    bundle_size: int
+    bundle_digest: Sha256DigestBytes
+    bundle_size: Size
     bundled_entries: BundledEntries
 
 
 class BundleCompressedResult(NamedTuple):
-    compressed_digest: bytes
-    compressed_size: int
+    compressed_digest: Sha256DigestBytes
+    compressed_size: Size
 
 
 def _batch_entries_with_filter(
     entries_to_bundle_gen: Generator[EntryToBeBundled],
     *,
-    expected_bundle_size: int,
-    min_bundle_ratio: float = MINIMUM_BUNDLE_SIZE_RATIO,
-    excluded_resources: set[bytes],
-) -> Generator[tuple[int, list[EntryToBeBundled]]]:
+    expected_bundle_size: Size,
+    min_bundled_files: int = MINIMUM_FILES_IN_BUNDLE,
+    excluded_resources: set[Sha256DigestBytes],
+) -> Generator[tuple[Size, list[EntryToBeBundled]]]:
     _batch = []
     _this_batch_size = 0
     for _entry in entries_to_bundle_gen:
@@ -89,16 +90,18 @@ def _batch_entries_with_filter(
             yield _this_batch_size, _batch
             _batch, _this_batch_size = [], 0
 
-    if _batch and _this_batch_size > expected_bundle_size * min_bundle_ratio:
+    # for the final batch, only preserve the bundle when the files count
+    #   reaches the minimum threshold.
+    if len(_batch) >= min_bundled_files:
         yield _this_batch_size, _batch
 
 
 def _generate_one_bundle(
-    entries_to_bundle: tuple[int, list[EntryToBeBundled]],
+    entries_to_bundle: tuple[Size, list[EntryToBeBundled]],
     *,
     resource_dir: Path,
     cctx: zstandard.ZstdCompressor,
-) -> tuple[BundleResult, BundleCompressedResult] | None:
+) -> tuple[BundleResult, BundleCompressedResult]:
     bundle_size, entries = entries_to_bundle
 
     _bundled_entries = BundledEntries()
@@ -140,23 +143,79 @@ def _generate_one_bundle(
 
 def _commit_one_bundle(
     *,
-    next_rs_id: int,
+    next_rs_id: ResourceID,
     bundle_res: BundleResult,
     compress_res: BundleCompressedResult,
     rs_orm: ResourceTableORM,
 ) -> int:
-    bundle_rs_id = next_rs_id
-    compressed_bundle_rs_id = bundle_rs_id + 1
-    next_rs_id = compressed_bundle_rs_id + 1
+    # NOTE(20260213): need to cover the cases when the newly
+    #   generated bundle is already presented in the resource_table.
 
-    # update the bundled entries rows in db
+    # ------ add compressed bundle into resource db ------ #
+    if compressed_bundle := rs_orm.orm_select_entry(
+        ResourceTableManifestTypedDict(
+            digest=compress_res.compressed_digest,
+        )
+    ):
+        compressed_bundle_rs_id = compressed_bundle.resource_id
+    else:
+        compressed_bundle_rs_id = next_rs_id
+        next_rs_id += 1
+
+        rs_orm.orm_insert_entry(
+            ResourceTableManifest(
+                resource_id=compressed_bundle_rs_id,
+                digest=compress_res.compressed_digest,
+                size=compress_res.compressed_size,
+            )
+        )
+
+    # ------ add original bundle to the resource db ------ #
+    if original_bundle := rs_orm.orm_select_entry(
+        ResourceTableManifestTypedDict(
+            digest=bundle_res.bundle_digest,
+        )
+    ):
+        original_bundle_rs_id = original_bundle.resource_id
+        # update the already existed bundle's filter_applied field
+        if not original_bundle.filter_applied:
+            rs_orm.orm_update_entries(
+                set_values=ResourceTableManifestTypedDict(
+                    filter_applied=CompressFilter(
+                        resource_id=compressed_bundle_rs_id,
+                        compression_alg=ZSTD_COMPRESSION_ALG,
+                    ),
+                ),
+                where_cols_value=ResourceTableManifestTypedDict(
+                    resource_id=original_bundle_rs_id,
+                ),
+            )
+        # it should be a very very edge case of having two exactly same bundle.
+        # if that is the case we will not update the filter_applied field.
+    else:
+        original_bundle_rs_id = next_rs_id
+        next_rs_id += 1
+
+        rs_orm.orm_insert_entry(
+            ResourceTableManifest(
+                resource_id=original_bundle_rs_id,
+                digest=bundle_res.bundle_digest,
+                size=bundle_res.bundle_size,
+                filter_applied=CompressFilter(
+                    resource_id=compressed_bundle_rs_id,
+                    compression_alg=ZSTD_COMPRESSION_ALG,
+                ),
+            )
+        )
+
+    # ------ update the bundled entries rows in db ------ #
     bundled_entries = bundle_res.bundled_entries
     rs_orm.orm_update_entries_many(
         set_cols=("filter_applied",),
         set_cols_value=(
             ResourceTableManifestTypedDict(
                 filter_applied=BundleFilter(
-                    bundle_resource_id=bundle_rs_id,
+                    bundle_resource_id=original_bundle_rs_id,
                     offset=_offset,
                     len=_len,
                 )
@@ -170,26 +229,6 @@ def _commit_one_bundle(
         ),
     )
 
-    # commit original bundle into db
-    rs_orm.orm_insert_entry(
-        ResourceTableManifest(
-            resource_id=bundle_rs_id,
-            digest=bundle_res.bundle_digest,
-            size=bundle_res.bundle_size,
-            filter_applied=CompressFilter(
-                resource_id=compressed_bundle_rs_id,
-                compression_alg=ZSTD_COMPRESSION_ALG,
-            ),
-        )
-    )
-    # commit compressed bundle into db
-    rs_orm.orm_insert_entry(
-        ResourceTableManifest(
-            resource_id=compressed_bundle_rs_id,
-            digest=compress_res.compressed_digest,
-            size=compress_res.compressed_size,
-        )
-    )
     return next_rs_id
 
 
@@ -203,7 +242,7 @@ class BundleFilterProcesser:
         bundle_upper_bound: int = cfg.BUNDLE_UPPER_THRESHOULD,
         bundle_blob_size: int = cfg.BUNDLE_SIZE,
         bundle_compressed_max_sum: int = cfg.BUNDLES_COMPRESSED_MAXIMUM_SUM,
-        protected_resources: set[bytes],
+        protected_resources: set[Sha256DigestBytes],
     ) -> None:
         self._protected_resources = protected_resources
         self._resource_dir = resource_dir
@@ -213,11 +252,9 @@ class BundleFilterProcesser:
         self._bundle_blob_size = bundle_blob_size
         self._bundle_compressed_max_sum = bundle_compressed_max_sum
 
-    def process(self):
-        with contextlib.closing(self._db_helper.connect_rstable_db()) as conn:
-            rs_orm = self._db_helper.get_orm(conn)
+    def _process_bundle(self) -> list[tuple[BundleResult, BundleCompressedResult]]:
+        with self._db_helper.get_orm() as rs_orm:
             _table_name, _table_spec = rs_orm.orm_table_name, rs_orm.orm_table_spec
-
             #
             # ------ processing entries and generating bundles ------ #
             #
@@ -253,21 +290,16 @@ class BundleFilterProcesser:
             total_bundled_f_count = 0
             total_bundled_f_size = 0
 
-            bundle_results: list[tuple[BundleResult, BundleCompressedResult]] = []
-
+            bundle_result: list[tuple[BundleResult, BundleCompressedResult]] = []
             for _batch in batch_gen:
                 if compressed_bundle_size > self._bundle_compressed_max_sum:
                     break
 
-                _res = _generate_one_bundle(
+                _bundle_res, _compress_res = _generate_one_bundle(
                     _batch,
                     resource_dir=self._resource_dir,
                     cctx=cctx,
                 )
-                if not _res:
-                    break  # no bundle is created
-
-                _bundle_res, _compress_res = _res
 
                 compressed_bundle_size += _compress_res.compressed_size
                 total_bundled_f_count += len(_bundle_res.bundled_entries)
@@ -280,22 +312,27 @@ class BundleFilterProcesser:
                     f"bundle size: {human_readable_size(_bundle_res.bundle_size)}.\n"
                     f"bundle compressed size: {human_readable_size(_compress_res.compressed_size)}"
                 )
-                bundle_results.append((_bundle_res, _compress_res))
-
-            logger.info("all bundles are generated, start to update database ...")
+                bundle_result.append((_bundle_res, _compress_res))
 
             # finalize the query as we need to do db update next
             with contextlib.suppress(Exception):
                 entries_to_bundle_gen.throw(StopIteration)
 
-            #
-            # ------ update database ------ #
-            #
-            # NOTE: resource_id starts from 1
-            # NOTE: we cannot execute sqlite3 query when previous query hasn't finished,
-            #       so we pre-calculate the next_rs_id here.
-            next_rs_id: int = count_entries_in_table(rs_orm) + 1
-            for _bundle_res, _compress_res in bundle_results:
+        logger.info(
+            (
+                f"bundle_filter: total {total_bundled_f_count} files({human_readable_size(total_bundled_f_size)}) are bundled.\n"
+                f"{bundle_blobs_count} bundle blobs are created.\n"
+                f"bundles blobs are compressed to {human_readable_size(compressed_bundle_size)} with zstd."
+            )
+        )
+        return bundle_result
+
+    def _update_db(
+        self, bundle_result: list[tuple[BundleResult, BundleCompressedResult]]
+    ) -> None:
+        with self._db_helper.get_orm() as rs_orm:
+            next_rs_id = count_entries_in_table(rs_orm) + 1
+            for _bundle_res, _compress_res in bundle_result:
                 next_rs_id = _commit_one_bundle(
                     next_rs_id=next_rs_id,
                     bundle_res=_bundle_res,
@@ -303,11 +340,8 @@ class BundleFilterProcesser:
                     rs_orm=rs_orm,
                 )
 
-            logger.info(
-                (
-                    f"bundle_filter: total {total_bundled_f_count} files({human_readable_size(total_bundled_f_size)}) are bundled.\n"
-                    f"{bundle_blobs_count} bundle blobs are created.\n"
-                    f"bundles blobs are compressed to {human_readable_size(compressed_bundle_size)} with zstd."
-                )
-            )
-            logger.info(f"next_rs_id: {count_entries_in_table(rs_orm) + 1}")
+    def process(self) -> None:
+        bundle_result = self._process_bundle()
+
+        logger.info("all bundles are generated, start to update database ...")
+        self._update_db(bundle_result)
