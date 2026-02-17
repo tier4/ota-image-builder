@@ -44,8 +44,8 @@ from ._db_utils import count_entries_in_table
 
 logger = logging.getLogger(__name__)
 
-# If the bundle is smaller than 3MiB, we don't create bundle from it.
-MINIMUM_BUNDLE_SIZE_RATIO = 0.05
+MINIMUM_FILES_IN_BUNDLE = 128
+"""Do not create bundle if the bundle contains less than 128 files."""
 
 BundledEntries = dict[tuple[ResourceID, Sha256DigestBytes], tuple[int, int]]
 """
@@ -74,7 +74,7 @@ def _batch_entries_with_filter(
     entries_to_bundle_gen: Generator[EntryToBeBundled],
     *,
     expected_bundle_size: Size,
-    min_bundle_ratio: float = MINIMUM_BUNDLE_SIZE_RATIO,
+    min_bundled_files: int = MINIMUM_FILES_IN_BUNDLE,
     excluded_resources: set[Sha256DigestBytes],
 ) -> Generator[tuple[Size, list[EntryToBeBundled]]]:
     _batch = []
@@ -90,7 +90,9 @@ def _batch_entries_with_filter(
             yield _this_batch_size, _batch
             _batch, _this_batch_size = [], 0
 
-    if _batch and _this_batch_size > expected_bundle_size * min_bundle_ratio:
+    # for the final batch, only preserve the bundle when the files count
+    #   reaches the minimum threshold.
+    if len(_batch) >= min_bundled_files:
         yield _this_batch_size, _batch
 
 
