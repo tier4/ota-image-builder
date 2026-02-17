@@ -247,7 +247,11 @@ def add_image_cmd(args: Namespace) -> None:
     image_root = Path(args.image_root)
     if not check_if_valid_ota_image(image_root):
         exit_with_err_msg(f"{image_root} is not a valid OTA image root directory.")
+
     index_helper = ImageIndexHelper(image_root=image_root)
+    image_index = index_helper.image_index
+    if image_index.image_finalized or image_index.image_signed:
+        exit_with_err_msg("Modifying an already finalized image is NOT allowed, abort!")
 
     rootfs_path = Path(args.rootfs)
     if not rootfs_path.is_dir():
