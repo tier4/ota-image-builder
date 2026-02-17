@@ -53,7 +53,10 @@ _global_shutdown = False
 
 CompressionResult = WriteThreadSafeDict[ResourceID, tuple[Sha256DigestBytes, Size]]
 
-QUERY_BATCH_SIZE = 128
+SELECT_BATCH_SIZE = 128
+"""The maximum params for query with WHERE ... IN (...).
+128 is choosen with balancing memory usage and efficiency.
+"""
 
 
 class CompressionFilterProcesser:
@@ -192,7 +195,7 @@ class CompressionFilterProcesser:
 
             # batch queries to select compressed entries from db
             compressed_entries: dict[Sha256DigestBytes, ResourceID] = {}
-            for _batch in batched(compressed.values(), QUERY_BATCH_SIZE, strict=False):
+            for _batch in batched(compressed.values(), SELECT_BATCH_SIZE, strict=False):
                 _params_holder = ",".join(itertools.repeat("?", len(_batch)))
                 # fmt: off
                 _query_res = rs_orm.orm_execute(
