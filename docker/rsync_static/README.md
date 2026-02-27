@@ -36,6 +36,9 @@ mkdir export
 # here we dump the ubuntu:24.04 image's rootfs
 sudo docker run --rm -v "$(pwd)/export":/export -v "$(pwd)/rsync":/rsync:ro \
     ubuntu:24.04 /rsync -axAXH '--exclude=/sys/***' '--exclude=/proc/***' '--exclude=/tmp/***' \
-        '--exclude=/dev/***' '--exclude=/export/***' \
+        '--exclude=/dev/***' '--exclude=/export/***' --exclude=/rsync --exclude=/.dockerenv \
         / /export
+
+# remember to add the important mountpoints place holders back
+sudo mkdir -p export/sys export/proc export/tmp export/dev
 ```
