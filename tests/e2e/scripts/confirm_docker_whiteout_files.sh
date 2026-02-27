@@ -9,6 +9,7 @@ ROOTFS=${1}
 
 cleanup() {
     podman stop verify_dind 2>/dev/null || true
+    return
 }
 trap cleanup EXIT
 
@@ -20,7 +21,7 @@ set +x
 max_wait_seconds=30
 elapsed=0
 until podman exec verify_dind docker info >/dev/null 2>&1; do
-    if [ "${elapsed}" -ge "${max_wait_seconds}" ]; then
+    if [[ "${elapsed}" -ge "${max_wait_seconds}" ]]; then
         echo "dockerd did not become ready within ${max_wait_seconds} seconds" >&2
         exit 1
     fi
