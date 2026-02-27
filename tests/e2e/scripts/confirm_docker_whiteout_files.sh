@@ -32,7 +32,7 @@ set -x
 # verify the built upperimage
 # all files under /lot_of_empty_files are removed at upperimage
 podman exec verify_dind docker run --rm upperimage find /lot_of_empty_files -maxdepth 0 -empty | grep -q .
-! podman exec verify_dind docker run --rm upperimage test -d /dir_with_subdir
-! podman exec verify_dind docker run --rm upperimage test -d /dir_contents_changed/dir_to_be_removed
+podman exec verify_dind docker run --rm upperimage test ! -d /dir_with_subdir
+podman exec verify_dind docker run --rm upperimage test ! -d /dir_contents_changed/dir_to_be_removed
 podman exec verify_dind docker run --rm upperimage test -d /file_become_dir
 podman exec verify_dind docker run --rm upperimage test -f /dir_become_file
