@@ -1,6 +1,9 @@
 #!/bin/bash
-
 # See e2e_setup_sys_img.sh about how upperimage is generated.
+set -eux
+
+echo "------------ verify the built docker image ------------"
+echo "Confirm the whiteout files are properly preserved and working"
 
 ROOTFS=${1}
 
@@ -22,12 +25,11 @@ done
 set -x
 
 # verify the built upperimage
-IMAGE_REF=upperimage
 # all files under /lot_of_empty_files are removed at upperimage
-podman exec verify_dind docker run upperimage find /lot_of_empty_files -maxdepth 0 -empty | grep -q .
-! podman exec verify_dind docker run upperimage test -d /dir_with_subdir
-! podman exec verify_dind docker run upperimage test -d /dir_contents_changed/dir_to_be_removed
-podman exec verify_dind docker run upperimage test -d /file_become_dir
-podman exec verify_dind docker run upperimage test -f /dir_become_file
+podman exec verify_dind docker run --rm upperimage find /lot_of_empty_files -maxdepth 0 -empty | grep -q .
+! podman exec verify_dind docker run --rm upperimage test -d /dir_with_subdir
+! podman exec verify_dind docker run --rm upperimage test -d /dir_contents_changed/dir_to_be_removed
+podman exec verify_dind docker run --rm upperimage test -d /file_become_dir
+podman exec verify_dind docker run --rm upperimage test -f /dir_become_file
 
 podman stop verify_dind
