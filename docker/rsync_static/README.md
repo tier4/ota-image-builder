@@ -35,7 +35,8 @@ mkdir export
 # will export the rootfs from container to the export folder
 # here we dump the ubuntu:24.04 image's rootfs
 sudo docker run --rm -v "$(pwd)/export":/export -v "$(pwd)/rsync":/rsync:ro \
-    ubuntu:24.04 /rsync -axAXH '--exclude=/sys/***' '--exclude=/proc/***' '--exclude=/tmp/***' \
+    --entrypoint /rsync ubuntu:24.04 \
+        -axAXH '--exclude=/sys/***' '--exclude=/proc/***' '--exclude=/tmp/***' \
         '--exclude=/dev/***' '--exclude=/export/***' --exclude=/rsync --exclude=/.dockerenv \
         / /export
 
