@@ -1,0 +1,110 @@
+name: Release CI
+
+on:
+  # no need to build it everytime
+  workflow_dispatch:
+
+env:
+  RSYNC_VERSION: 3.4.1
+  BASE_URL: ghcr.io/tier4/ota-image-builder/rsync-static
+
+jobs:
+  rsync-static_image_build:
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        platform: [x86_64, arm64]
+        # NOTE: we do native build for both platforms
+        include:
+          - platform: x86_64
+            os: ubuntu-22.04
+          - platform: arm64
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Build, test and export rsync static binary
+        run: |
+          docker build \
+            --build-arg=RSYNC_VERSION=${RSYNC_VERSION} \
+            -t rsync-static:${{ matrix.platform }} docker/rsync_static
+          docker run --rm rsync-static:${{ matrix.platform }} --version
+          docker save rsync-static:${{ matrix.platform }} --output ./rsync-static.tar
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: rsync-static_${{ matrix.platform }}
+          path: ./rsync-static.tar
+
+  publish_rsync-static_images:
+    needs: ["rsync-static_image_build"]
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install podman
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y podman
+
+      - name: Download x86_64 artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: rsync-static_x86_64
+          path: x86_64_dist
+
+      - name: Download arm64 artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: rsync-static_arm64
+          path: arm64_dist
+
+      - name: Load docker images and merge manifests
+        id: merge_image
+        run: |
+          # load images
+          podman load -i x86_64_dist/rsync-static.tar
+          podman load -i arm64_dist/rsync-static.tar
+
+          # generate multi-arch image
+          podman manifest create localhost/rsync-static:multi-arch
+          podman manifest add localhost/rsync-static:multi-arch \
+            containers-storage:rsync-static:x86_64 --arch x86_64
+          podman manifest add localhost/rsync-static:multi-arch \
+            containers-storage:rsync-static:arm64 --arch arm64
+
+          # also separately tag each arch-specific image
+          podman tag rsync-static:x86_64 ${BASE_URL}:${RSYNC_VERSION}-x86_64
+          podman tag rsync-static:arm64 ${BASE_URL}:${RSYNC_VERSION}-arm64
+
+          # tag generated image
+          podman tag localhost/rsync-static:multi-arch ${BASE_URL}:${RSYNC_VERSION}
+          podman rmi localhost/rsync-static:multi-arch
+
+          # inspect manifest
+          podman manifest inspect ${BASE_URL}:${RSYNC_VERSION}
+
+      - name: Login to GHCR
+        id: podman_login
+        uses: redhat-actions/podman-login@4934294ad0449894bcd1e9f191899d7292469603 # v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push rsync-static docker image
+        run: |
+          # push arch specific image
+          podman push --compression-format zstd --compression-level 6 ${BASE_URL}:${RSYNC_VERSION}-x86_64
+          podman push --compression-format zstd --compression-level 6 ${BASE_URL}:${RSYNC_VERSION}-arm64
+
+          # push multi-arch image
+          podman manifest push \
+            --all --compression-format zstd --compression-level 6 \
+            ${BASE_URL}:${RSYNC_VERSION}
