@@ -76,7 +76,7 @@ jobs:
         run: |
           rm -rf ${CERT_DIR}/*.key
           ./dist/ota-image-tools verify-sign --ca-dir ${CERT_DIR} ${OTA_IMAGE_OUTPUT}
-      - name: Deploy OTA image payload(dev payload) and Compare with origin
+      - name: Deploy OTA image payload(dev payload) and test it
         run: |
           sudo ./dist/ota-image-tools deploy-image \
             --image ${OTA_IMAGE_ARTIFACT} \
@@ -84,6 +84,7 @@ jobs:
             --ecu-id autoware --release-key dev
           sudo rm -rf ${DEPLOYED_ROOTFS}/.ota-resources
           sudo ./tests/e2e/scripts/compare_rootfs.py ${SYS_IMG_ROOTFS} ${DEPLOYED_ROOTFS}
+          sudo ./tests/e2e/scripts/confirm_docker_whiteout_files.sh ${DEPLOYED_ROOTFS}
       - name: Deploy OTA image payload(prd payload) and Compare with origin
         run: |
           sudo ./dist/ota-image-tools deploy-image \
