@@ -7,6 +7,11 @@ echo "Confirm the whiteout files are properly preserved and working"
 
 ROOTFS=${1}
 
+cleanup() {
+    podman stop verify_dind 2>/dev/null || true
+}
+trap cleanup EXIT
+
 # start the dockerd in exported rootfs
 podman run --rm -d --replace --name verify_dind --privileged \
     --rootfs "$(realpath ${ROOTFS})" /usr/local/bin/dockerd-entrypoint.sh
@@ -31,5 +36,3 @@ podman exec verify_dind docker run --rm upperimage find /lot_of_empty_files -max
 ! podman exec verify_dind docker run --rm upperimage test -d /dir_contents_changed/dir_to_be_removed
 podman exec verify_dind docker run --rm upperimage test -d /file_become_dir
 podman exec verify_dind docker run --rm upperimage test -f /dir_become_file
-
-podman stop verify_dind
