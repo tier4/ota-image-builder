@@ -1,6 +1,6 @@
 # OTA Image Builder
 
-The OTA image builder is an implementation of the [OTA image specification version 1](https://github.com/tier4/ota-image-libs/tree/main/spec), building OTA image from input system rootfs images.
+The OTA image builder is a builder implementation of the [OTA image specification version 1](https://github.com/tier4/ota-image-libs/tree/main/spec), building OTA image from input system rootfs images.
 
 ## Features
 
