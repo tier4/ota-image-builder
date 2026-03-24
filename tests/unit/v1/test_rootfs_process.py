@@ -28,8 +28,130 @@ from ota_image_builder.v1._resource_process._rootfs_process import (
     EMPTY_FILE_RS_ID,
     ResourceRegister,
     SystemImageProcesser,
+    XattrProcessor,
     _global_shutdown_on_failed,
 )
+
+
+class TestXattrProcessor:
+    """Tests for XattrProcessor class."""
+
+    # -- _namespaced_file_cap_fixup --
+
+    def test_fixup_v3_cap_strips_namespace(self):
+        """V3 file cap (24 bytes) should be converted to V2 (20 bytes)."""
+        # Build a 24-byte v3 cap: first 3 bytes arbitrary, byte[3]=0x03 (v3 marker),
+        # bytes 4..19 are the v2 payload, bytes 20..23 are the rootid to strip.
+        prefix = b"\x01\x00\x00"
+        v2_payload = bytes(range(16))  # 16 bytes (indices 4..19)
+        rootid = b"\xaa\xbb\xcc\xdd"
+        v3_cap = prefix + XattrProcessor.FILE_CAP_V3 + v2_payload + rootid
+
+        result = XattrProcessor._namespaced_file_cap_fixup(v3_cap)
+
+        assert len(result) == 20
+        # Version byte patched to v2
+        assert result[3:4] == XattrProcessor.FILE_CAP_V2
+        # Prefix preserved
+        assert result[:3] == prefix
+        # V2 payload preserved, rootid stripped
+        assert result[4:] == v2_payload
+
+    def test_fixup_v2_cap_unchanged(self):
+        """V2 file cap (20 bytes) should be returned as-is."""
+        v2_cap = b"\x01\x00\x00" + XattrProcessor.FILE_CAP_V2 + bytes(16)
+
+        result = XattrProcessor._namespaced_file_cap_fixup(v2_cap)
+
+        assert result is v2_cap  # identity — no copy made
+
+    def test_fixup_non_v3_24_bytes_unchanged(self):
+        """24-byte blob whose version byte is not v3 should be returned as-is."""
+        cap = b"\x01\x00\x00" + XattrProcessor.FILE_CAP_V2 + bytes(20)
+        assert len(cap) == 24
+
+        result = XattrProcessor._namespaced_file_cap_fixup(cap)
+
+        assert result is cap
+
+    def test_fixup_wrong_length_unchanged(self):
+        """Blob that is not exactly 24 bytes should be returned as-is."""
+        for length in (0, 10, 20, 25, 100):
+            cap = bytes(length)
+            result = XattrProcessor._namespaced_file_cap_fixup(cap)
+            assert result is cap
+
+    # -- process_xattrs --
+
+    def test_process_xattrs_applies_fixup_to_file_cap(self, mocker):
+        """security.capability xattr should go through the fixup path."""
+        prefix = b"\x01\x00\x00"
+        v2_payload = bytes(16)
+        rootid = b"\xaa\xbb\xcc\xdd"
+        v3_cap = prefix + XattrProcessor.FILE_CAP_V3 + v2_payload + rootid
+
+        mocker.patch("os.listxattr", return_value=["security.capability"])
+        mocker.patch("os.getxattr", return_value=v3_cap)
+
+        result = XattrProcessor.process_xattrs(Path("/fake"))
+
+        assert "security.capability" in result
+        assert len(result["security.capability"]) == 20
+        assert result["security.capability"][3:4] == XattrProcessor.FILE_CAP_V2
+
+    def test_process_xattrs_non_cap_xattr_passthrough(self, mocker):
+        """Non-capability xattrs should be passed through unmodified."""
+        raw_value = b"some_xattr_value"
+        mocker.patch("os.listxattr", return_value=["user.custom"])
+        mocker.patch("os.getxattr", return_value=raw_value)
+
+        result = XattrProcessor.process_xattrs(Path("/fake"))
+
+        assert result == {"user.custom": raw_value}
+
+    def test_process_xattrs_multiple_xattrs(self, mocker):
+        """Multiple xattrs should all be included; only cap gets fixup."""
+        v2_cap = b"\x01\x00\x00" + XattrProcessor.FILE_CAP_V2 + bytes(16)
+        custom_val = b"hello"
+
+        mocker.patch(
+            "os.listxattr",
+            return_value=["security.capability", "user.foo"],
+        )
+        mocker.patch(
+            "os.getxattr",
+            side_effect=lambda _f, name, **kw: v2_cap
+            if name == "security.capability"
+            else custom_val,
+        )
+
+        result = XattrProcessor.process_xattrs(Path("/fake"))
+
+        assert len(result) == 2
+        # v2 cap is already valid, returned unchanged
+        assert result["security.capability"] == v2_cap
+        assert result["user.foo"] == custom_val
+
+    def test_process_xattrs_empty(self, mocker):
+        """File with no xattrs should return empty dict."""
+        mocker.patch("os.listxattr", return_value=[])
+
+        result = XattrProcessor.process_xattrs(Path("/fake"))
+
+        assert result == {}
+
+    def test_process_xattrs_follows_symlinks_false(self, mocker):
+        """Both listxattr and getxattr should be called with follow_symlinks=False."""
+        mocker.patch("os.listxattr", return_value=["user.x"])
+        mock_getxattr = mocker.patch("os.getxattr", return_value=b"v")
+        mock_listxattr = mocker.patch("os.listxattr", return_value=["user.x"])
+
+        XattrProcessor.process_xattrs(Path("/fake"))
+
+        mock_listxattr.assert_called_once_with(Path("/fake"), follow_symlinks=False)
+        mock_getxattr.assert_called_once_with(
+            Path("/fake"), "user.x", follow_symlinks=False
+        )
 
 
 class TestResourceRegister:
