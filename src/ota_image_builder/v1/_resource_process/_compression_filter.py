@@ -51,6 +51,12 @@ logger = logging.getLogger(__name__)
 
 _global_shutdown = False
 
+ZSTD_MAGIC_NUMBER = b"\x28\xb5\x2f\xfd"
+"""Zstd frame magic number 0xFD2FB528 in little-endian.
+
+See https://www.rfc-editor.org/rfc/rfc8878#section-3.1.1
+"""
+
 CompressionResult = WriteThreadSafeDict[ResourceID, tuple[Sha256DigestBytes, Size]]
 
 SELECT_BATCH_SIZE = 128
@@ -119,6 +125,10 @@ class CompressionFilterProcesser:
     ) -> None:
         resource_id, origin_digest, origin_size = row
         origin_resource = self._resource_dir / origin_digest.hex()
+
+        with open(origin_resource, "rb") as f:
+            if f.read(4) == ZSTD_MAGIC_NUMBER:
+                return  # skip already zstd compressed files
 
         _tmp_compressed = self._resource_dir / tmp_fname(origin_digest.hex())
         try:
