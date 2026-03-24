@@ -3,6 +3,7 @@
     "allow": [
       "Bash(uv sync*)",
       "Bash(uv build*)",
+      "Bash(uv run pytest*)",
       "Bash(grep *)",
       "Bash(wc *)",
       "Bash(pre-commit run*)",
