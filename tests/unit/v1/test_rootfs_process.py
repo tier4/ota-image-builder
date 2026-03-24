@@ -120,9 +120,9 @@ class TestXattrProcessor:
         )
         mocker.patch(
             "os.getxattr",
-            side_effect=lambda _f, name, **kw: v2_cap
-            if name == "security.capability"
-            else custom_val,
+            side_effect=lambda _f, name, **kw: (
+                v2_cap if name == "security.capability" else custom_val
+            ),
         )
 
         result = XattrProcessor.process_xattrs(Path("/fake"))
