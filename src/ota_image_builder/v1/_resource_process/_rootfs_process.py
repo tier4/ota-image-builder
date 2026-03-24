@@ -83,7 +83,7 @@ class XattrProcessor:
         # NOTE: v3(24bytes) is just v2(20bytes) + rootid(4bytes), so we need to:
         #   1. patch the version bytes to v2
         #   2. strip away the rootid field
-        if len(_in) == cls.FILE_CAP_V3_LEN and _in[3] == cls.FILE_CAP_V3:
+        if len(_in) == cls.FILE_CAP_V3_LEN and _in[3:4] == cls.FILE_CAP_V3:
             return _in[:3] + cls.FILE_CAP_V2 + _in[4:20]
         return _in
 
