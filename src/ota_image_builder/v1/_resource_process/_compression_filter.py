@@ -51,11 +51,33 @@ logger = logging.getLogger(__name__)
 
 _global_shutdown = False
 
-ZSTD_MAGIC_NUMBER = b"\x28\xb5\x2f\xfd"
-"""Zstd frame magic number 0xFD2FB528 in little-endian.
 
-See https://www.rfc-editor.org/rfc/rfc8878#section-3.1.1
-"""
+class CompressedFilesDetector:
+    """Detect whether a file is already compressed by checking magic numbers."""
+
+    ZSTD_MAGIC_NUMBER = b"\x28\xb5\x2f\xfd"
+    """Zstd frame magic number 0xFD2FB528 in little-endian.
+
+    See https://www.rfc-editor.org/rfc/rfc8878#section-3.1.1
+    """
+
+    GZIP_MAGIC_NUMBER = b"\x1f\x8b"
+    """Gzip magic number.
+
+    See https://www.rfc-editor.org/rfc/rfc1952#section-2.3.1
+    """
+
+    # The longest magic number we need to read.
+    _MAGIC_NUMBERS: tuple[bytes, ...] = (ZSTD_MAGIC_NUMBER, GZIP_MAGIC_NUMBER)
+    _MAX_MAGIC_LEN = max(len(ZSTD_MAGIC_NUMBER), len(GZIP_MAGIC_NUMBER))
+
+    @classmethod
+    def check_compressed(cls, fpath: Path) -> bool:
+        """Return True if the file starts with a known compression magic number."""
+        with open(fpath, "rb") as f:
+            header = f.read(cls._MAX_MAGIC_LEN)
+        return any(header.startswith(magic) for magic in cls._MAGIC_NUMBERS)
+
 
 CompressionResult = WriteThreadSafeDict[ResourceID, tuple[Sha256DigestBytes, Size]]
 
@@ -126,9 +148,8 @@ class CompressionFilterProcesser:
         resource_id, origin_digest, origin_size = row
         origin_resource = self._resource_dir / origin_digest.hex()
 
-        with open(origin_resource, "rb") as f:
-            if f.read(4) == ZSTD_MAGIC_NUMBER:
-                return  # skip already zstd compressed files
+        if CompressedFilesDetector.check_compressed(origin_resource):
+            return  # skip already compressed files
 
         _tmp_compressed = self._resource_dir / tmp_fname(origin_digest.hex())
         try:
