@@ -69,7 +69,7 @@ class CompressedFilesDetector:
 
     # The longest magic number we need to read.
     _MAGIC_NUMBERS: tuple[bytes, ...] = (ZSTD_MAGIC_NUMBER, GZIP_MAGIC_NUMBER)
-    _MAX_MAGIC_LEN = max(len(ZSTD_MAGIC_NUMBER), len(GZIP_MAGIC_NUMBER))
+    _MAX_MAGIC_LEN = max(len(_magic) for _magic in _MAGIC_NUMBERS)
 
     @classmethod
     def check_compressed(cls, fpath: Path) -> bool:
