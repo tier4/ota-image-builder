@@ -15,15 +15,19 @@
 
 from __future__ import annotations
 
+import gzip
+import sqlite3
 from concurrent.futures import Future
 from hashlib import sha256
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import zstandard
+from pytest_mock import MockerFixture
 
+import ota_image_builder.v1._resource_process._compression_filter as cf_module
 from ota_image_builder._common import WriteThreadSafeDict
 from ota_image_builder.v1._resource_process._compression_filter import (
+    CompressedFilesDetector,
     CompressionFilterProcesser,
 )
 
@@ -36,9 +40,6 @@ class TestCompressionFilterProcesser:
         resource_dir = tmp_path / "resources"
         resource_dir.mkdir()
         rst_dbf = tmp_path / "resource_table.db"
-
-        # Create a minimal database file
-        import sqlite3
 
         conn = sqlite3.connect(rst_dbf)
         conn.close()
@@ -67,8 +68,6 @@ class TestCompressionFilterProcesser:
         resource_dir.mkdir()
         rst_dbf = tmp_path / "resource_table.db"
 
-        import sqlite3
-
         conn = sqlite3.connect(rst_dbf)
         conn.close()
 
@@ -88,8 +87,6 @@ class TestCompressionFilterProcesser:
         resource_dir = tmp_path / "resources"
         resource_dir.mkdir()
         rst_dbf = tmp_path / "resource_table.db"
-
-        import sqlite3
 
         conn = sqlite3.connect(rst_dbf)
         conn.close()
@@ -115,13 +112,13 @@ class TestCompressionFilterProcesser:
         assert size < 10000  # Should be smaller after compression
         assert len(digest) == 32  # SHA256 digest
 
-    def test_task_done_cb_releases_semaphore(self, tmp_path: Path):
+    def test_task_done_cb_releases_semaphore(
+        self, tmp_path: Path, mocker: MockerFixture
+    ):
         """Test that task_done_cb releases semaphore."""
         resource_dir = tmp_path / "resources"
         resource_dir.mkdir()
         rst_dbf = tmp_path / "resource_table.db"
-
-        import sqlite3
 
         conn = sqlite3.connect(rst_dbf)
         conn.close()
@@ -137,7 +134,7 @@ class TestCompressionFilterProcesser:
         processor._se.acquire()
 
         # Create a mock future with no exception
-        mock_future = MagicMock(spec=Future)
+        mock_future = mocker.MagicMock(spec=Future)
         mock_future.exception.return_value = None
 
         processor._task_done_cb(mock_future)
@@ -145,15 +142,13 @@ class TestCompressionFilterProcesser:
         # Semaphore should be released (can acquire again)
         assert processor._se.acquire(blocking=False) is True
 
-    def test_task_done_cb_handles_exception(self, tmp_path: Path):
+    def test_task_done_cb_handles_exception(
+        self, tmp_path: Path, mocker: MockerFixture
+    ):
         """Test that task_done_cb handles exceptions and triggers shutdown."""
-        import ota_image_builder.v1._resource_process._compression_filter as cf_module
-
         resource_dir = tmp_path / "resources"
         resource_dir.mkdir()
         rst_dbf = tmp_path / "resource_table.db"
-
-        import sqlite3
 
         conn = sqlite3.connect(rst_dbf)
         conn.close()
@@ -172,15 +167,15 @@ class TestCompressionFilterProcesser:
         processor._se.acquire()
 
         # Create a mock future with an exception
-        mock_future = MagicMock(spec=Future)
+        mock_future = mocker.MagicMock(spec=Future)
         mock_future.exception.return_value = Exception("test error")
 
-        with patch.object(cf_module, "_thread") as mock_thread:
-            processor._task_done_cb(mock_future)
+        mock_thread = mocker.patch.object(cf_module, "_thread")
+        processor._task_done_cb(mock_future)
 
-            # Should set global shutdown and interrupt main
-            assert cf_module._global_shutdown is True
-            mock_thread.interrupt_main.assert_called_once()
+        # Should set global shutdown and interrupt main
+        assert cf_module._global_shutdown is True
+        mock_thread.interrupt_main.assert_called_once()
 
         # Reset global state
         cf_module._global_shutdown = False
@@ -190,8 +185,6 @@ class TestCompressionFilterProcesser:
         resource_dir = tmp_path / "resources"
         resource_dir.mkdir()
         rst_dbf = tmp_path / "resource_table.db"
-
-        import sqlite3
 
         conn = sqlite3.connect(rst_dbf)
         conn.close()
@@ -228,8 +221,6 @@ class TestCompressionFilterProcesser:
         resource_dir.mkdir()
         rst_dbf = tmp_path / "resource_table.db"
 
-        import sqlite3
-
         conn = sqlite3.connect(rst_dbf)
         conn.close()
 
@@ -257,3 +248,98 @@ class TestCompressionFilterProcesser:
         assert not test_file.exists()
         # Should be in compressed dict
         assert 1 in compressed
+
+    def test_process_one_entry_skips_already_zstd_compressed(self, tmp_path: Path):
+        """Test that already zstd-compressed files are skipped."""
+        resource_dir = tmp_path / "resources"
+        resource_dir.mkdir()
+        rst_dbf = tmp_path / "resource_table.db"
+
+        conn = sqlite3.connect(rst_dbf)
+        conn.close()
+
+        processor = CompressionFilterProcesser(
+            resource_dir=resource_dir,
+            rst_dbf=rst_dbf,
+            compression_ratio_threshold=1.1,
+            protected_resources=set(),
+        )
+
+        # Initialize thread local
+        processor._thread_worker_initializer()
+
+        # Create a zstd-compressed resource file
+        cctx = zstandard.ZstdCompressor()
+        zstd_content = cctx.compress(b"A" * 100000)
+        test_digest = sha256(zstd_content).digest()
+        test_file = resource_dir / test_digest.hex()
+        test_file.write_bytes(zstd_content)
+
+        # Process the entry
+        compressed = WriteThreadSafeDict()
+        processor._process_one_entry_at_thread(
+            (1, test_digest, len(zstd_content)), compressed
+        )
+
+        # File should remain untouched
+        assert test_file.exists()
+        assert test_file.read_bytes() == zstd_content
+        # Should not be in compressed dict
+        assert 1 not in compressed
+
+    def test_process_one_entry_skips_already_gzip_compressed(self, tmp_path: Path):
+        """Test that already gzip-compressed files are skipped."""
+        resource_dir = tmp_path / "resources"
+        resource_dir.mkdir()
+        rst_dbf = tmp_path / "resource_table.db"
+
+        conn = sqlite3.connect(rst_dbf)
+        conn.close()
+
+        processor = CompressionFilterProcesser(
+            resource_dir=resource_dir,
+            rst_dbf=rst_dbf,
+            compression_ratio_threshold=1.1,
+            protected_resources=set(),
+        )
+
+        # Initialize thread local
+        processor._thread_worker_initializer()
+
+        # Create a gzip-compressed resource file
+        gz_content = gzip.compress(b"A" * 100000)
+        test_digest = sha256(gz_content).digest()
+        test_file = resource_dir / test_digest.hex()
+        test_file.write_bytes(gz_content)
+
+        # Process the entry
+        compressed = WriteThreadSafeDict()
+        processor._process_one_entry_at_thread(
+            (1, test_digest, len(gz_content)), compressed
+        )
+
+        # File should remain untouched
+        assert test_file.exists()
+        assert test_file.read_bytes() == gz_content
+        # Should not be in compressed dict
+        assert 1 not in compressed
+
+
+class TestCompressedFilesDetector:
+    """Tests for CompressedFilesDetector class."""
+
+    def test_detects_zstd(self, tmp_path: Path):
+        zstd_file = tmp_path / "compressed.zst"
+        cctx = zstandard.ZstdCompressor()
+        zstd_file.write_bytes(cctx.compress(b"test content"))
+        assert CompressedFilesDetector.check_compressed(zstd_file) is True
+
+    def test_detects_gzip(self, tmp_path: Path):
+        gz_file = tmp_path / "compressed.gz"
+        gz_file.write_bytes(gzip.compress(b"test content"))
+        assert CompressedFilesDetector.check_compressed(gz_file) is True
+
+    def test_rejects_plain_file(self, tmp_path: Path):
+        plain_file = tmp_path / "plain.txt"
+        plain_file.write_bytes(b"plain text content")
+        assert CompressedFilesDetector.check_compressed(plain_file) is False
