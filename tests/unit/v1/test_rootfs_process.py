@@ -142,7 +142,6 @@ class TestXattrProcessor:
 
     def test_process_xattrs_follows_symlinks_false(self, mocker):
         """Both listxattr and getxattr should be called with follow_symlinks=False."""
-        mocker.patch("os.listxattr", return_value=["user.x"])
         mock_getxattr = mocker.patch("os.getxattr", return_value=b"v")
         mock_listxattr = mocker.patch("os.listxattr", return_value=["user.x"])
 
