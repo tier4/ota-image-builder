@@ -62,6 +62,48 @@ def _global_shutdown_on_failed(exc: BaseException):
         _thread.interrupt_main(signal.SIGINT)
 
 
+class XattrProcessor:
+    FILE_CAP_XATTR_KEY = "security.capability"
+    FILE_CAP_V3_LEN = 24
+    FILE_CAP_V2 = b"\x02"
+    FILE_CAP_V3 = b"\x03"
+
+    @classmethod
+    def _namespaced_file_cap_fixup(cls, _in: bytes) -> bytes:
+        """Fix up the namespaced file cap.
+
+        For build executed by namespaced rootless contexts, the
+        file capability xattr will also be namespaced. We need
+        to fix up it to strip away namespace field, otherwise
+        the file cap will only work in the same namespaced context.
+
+        security.capability xattr spec:
+        https://github.com/torvalds/linux/blob/master/include/uapi/linux/capability.h
+        """
+        # NOTE: v3(24bytes) is just v2(20bytes) + rootid(4bytes), so we need to:
+        #   1. patch the version bytes to v2
+        #   2. strip away the rootid field
+        if len(_in) == cls.FILE_CAP_V3_LEN and _in[3:4] == cls.FILE_CAP_V3:
+            return _in[:3] + cls.FILE_CAP_V2 + _in[4:20]
+        return _in
+
+    @classmethod
+    def process_xattrs(cls, _f: Path) -> dict[str, bytes]:
+        """Xattr pre-processing logic.
+
+        Currently only do special treatment to file cap related xattrs.
+        """
+        res: dict[str, bytes] = {}
+        for attrn in os.listxattr(_f, follow_symlinks=False):
+            attrv = os.getxattr(_f, attrn, follow_symlinks=False)
+
+            if attrn == cls.FILE_CAP_XATTR_KEY:
+                res[attrn] = cls._namespaced_file_cap_fixup(attrv)
+            else:
+                res[attrn] = attrv
+        return res
+
+
 class ResourceRegister:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -110,12 +152,7 @@ class SystemImageProcesser:
 
     def _process_inode(self, fpath: Path) -> int:
         f_stat = fpath.stat(follow_symlinks=False)
-        xattrs = MsgPackedDict(
-            {
-                attrn: os.getxattr(fpath, attrn, follow_symlinks=False)
-                for attrn in os.listxattr(fpath, follow_symlinks=False)
-            }
-        )
+        xattrs = MsgPackedDict(XattrProcessor.process_xattrs(fpath))
 
         # fast path for non-hardlinked entry
         # NOTE(20250814): directory is naturally hardlinked, which st_nlink is always 3.
