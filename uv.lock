@@ -360,7 +360,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cryptography", specifier = ">=45.0.1,<47" },
+    { name = "cryptography", specifier = ">=45.0.1,<48" },
     { name = "msgpack", specifier = ">=1.1,<2" },
     { name = "ota-image-libs", url = "https://github.com/tier4/ota-image-libs/releases/download/v0.4.0/ota_image_libs-0.4.0-py3-none-any.whl" },
     { name = "pydantic", specifier = ">=2.10,<3" },
