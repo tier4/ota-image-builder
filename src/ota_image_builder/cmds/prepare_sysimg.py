@@ -62,6 +62,23 @@ BACKWARD_COMPAT_PA = [
 
 GLOB_SPECIAL_CHARS = re.compile(r"[\*\?\[\]\|]")
 
+# On a systemd-resolved managed system, /etc/resolv.conf is expected to be a
+# relative symlink pointing to the stub resolv.conf maintained at runtime by
+# systemd-resolved. The stub file itself lives under /run and thus does NOT
+# exist in a (cleaned) rootfs image, the symlink is intentionally "dangling".
+RESOLV_CONF_RELPATH = "etc/resolv.conf"
+RESOLV_CONF_SYMLINK_TARGET = "../run/systemd/resolve/stub-resolv.conf"
+
+# Matches a `nameserver <addr>` directive line (leading whitespace tolerated),
+# with <addr> restricted to IPv4/IPv6-like values (hex digits, `:` and `.`).
+# Commented out lines (starting with `#`) don't match and are thus ignored.
+NAMESERVER_PA = re.compile(r"^\s*nameserver\s+[a-fA-F0-9:\.]+", re.MULTILINE)
+
+
+def _is_valid_resolv_conf(content: str) -> bool:
+    """A simple check to the contents of a resolv.conf."""
+    return NAMESERVER_PA.search(content) is not None
+
 
 def _load_extra_patterns_from_file(_f: str) -> list[str]:
     _pattern_f = Path(_f)
@@ -134,26 +151,54 @@ class RootfsImagePreparer:
             entry_path = self._rootfs_dir / entry.lstrip("/")
             entry_path.mkdir(exist_ok=True, parents=True)
 
+    def _fixup_resolv_conf(self) -> None:
+        """Ensure /etc/resolv.conf is valid, otherwise fix it up."""
+        resolv_conf = self._rootfs_dir / RESOLV_CONF_RELPATH
+        if resolv_conf.is_symlink():
+            resolv_conf.unlink(missing_ok=True)
+        if resolv_conf.is_dir():  # how could it be a dir?
+            shutil.rmtree(resolv_conf, ignore_errors=True)
+
+        if resolv_conf.is_file():
+            try:
+                if not _is_valid_resolv_conf(resolv_conf.read_text()):
+                    raise ValueError("invalid resolv.conf")
+                return
+            except Exception:
+                resolv_conf.unlink(missing_ok=True)
+        else:  # thing that is not symlink, dir or regular file
+            resolv_conf.unlink(missing_ok=True)
+
+        if not resolv_conf.exists():
+            logger.info(
+                f"{resolv_conf} is missing or invalid, "
+                f"fixing it up as a symlink to {RESOLV_CONF_SYMLINK_TARGET}"
+            )
+            resolv_conf.parent.mkdir(parents=True, exist_ok=True)
+            resolv_conf.symlink_to(RESOLV_CONF_SYMLINK_TARGET)
+
     def prepare(self) -> None:
         """Prepare the system rootfs image."""
         logger.info(f"Preparing system rootfs image: {self._rootfs_dir}")
         self._process_cleanup()
         self._prepare_image()
+        self._fixup_resolv_conf()
         logger.info("System rootfs image prepared successfully.")
 
 
 def prepare_sysimg_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
+    _cmd_help_text = (
+        "Prepare a system image to make it ready for adding into OTA image. "
+        "This command will do some basic cleanup to the system rootfs image, "
+        "optionally do further cleanup with `--cleanup-pattern-file` specified."
+    )
+
     prepare_sysimg_cmd_args = sub_arg_parser.add_parser(
         name="prepare-sysimg",
-        help=(
-            _help_txt
-            := "Prepare a system image to make it ready for adding into OTA image. "
-            "This command will do some basic cleanup to the system rootfs image, "
-            "optionally do further cleanup with `--cleanup-pattern-file` specified."
-        ),
-        description=_help_txt,
+        help=_cmd_help_text,
+        description=_cmd_help_text,
         parents=parent_parser,
     )
     prepare_sysimg_cmd_args.add_argument(
