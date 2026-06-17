@@ -85,7 +85,7 @@ def seal_image_before_sign(
     _index_helper = ImageIndexHelper(image_root)
     if not _index_helper.image_index.image_finalized:
         exit_with_err_msg(
-            "ERR: image is not yet finalized, run the `finalize` command first, abort!"
+            "image is not yet finalized, run the `finalize` command first, abort!"
         )
     _index_helper.image_index.finalize_signing_image(force_sign=force_sign)
     _, _index_descriptor = _index_helper.sync_index()
