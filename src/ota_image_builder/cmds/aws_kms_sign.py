@@ -43,6 +43,7 @@ from ota_image_libs.v1.index_jwt.utils import (
     compose_unsigned_index_jwt_for_aws_kms_sign,
     decode_index_jwt_with_verification,
     get_index_jwt_sign_cert_chain,
+    get_unverified_jwt_headers,
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -243,54 +244,59 @@ def sign_with_aws_kms_prepare_cmd(args: Namespace) -> None:
 
 
 #
-# ------ sign-with-aws-kms ------ #
+# ------ sign-with-aws-kms-finish ------ #
 #
 
 
-def _load_input(_in: str | None) -> str:
-    """Resolve the ``input`` arg, return the retrieved raw JSON string.
+def _check_aws_kms_sign_resp_against_jwt(
+    signed_jwt: str, sign_resp: AWSKMSSignResponse
+) -> None:
+    """Ensure that the KMS sign response is for this JWT.
 
-    Accepts inline JSON (a string starting with ``{``), a file path, or ``-`` to read
-    from stdin.
+    The following checks are performed:
+    1. check if the JWT algorithm matches the KMS signing algorithm.
+    2. check if the JWT can pass self-verification(signature against embedded sign cert).
     """
-    if not _in:
-        exit_with_err_msg("empty input, abort!")
+    _headers = get_unverified_jwt_headers(signed_jwt)
+    _alg = _headers["alg"]
 
-    if _in.lstrip().startswith("{"):
-        return _in
-
-    if _in == "-":
-        try:
-            return sys.stdin.read()
-        except Exception as e:
-            exit_with_err_msg(f"failed to read input from stdin: {e!r}")
+    if (_kms_alg := get_aws_sign_alg(_alg)) != sign_resp.signing_algorithm:
+        exit_with_err_msg(
+            f"JWT's algorithm({_alg}) doesn't match "
+            f"the KMS sign response's algorithm({_kms_alg})!!! "
+            "Are you sure this sign_resp is actually for this OTA image???"
+        )
 
     try:
-        return Path(_in).read_text()
-    except FileNotFoundError:
-        exit_with_err_msg("the specified input file doesn't exist!")
+        _embedded_chain = get_index_jwt_sign_cert_chain(signed_jwt)
+        decode_index_jwt_with_verification(signed_jwt, _embedded_chain)
     except Exception as e:
-        exit_with_err_msg(f"failed to read input file: {e!r}")
+        logger.exception(f"assembled index.jwt failed self-verification: {e}")
+        exit_with_err_msg(
+            "the assembled index.jwt failed signature self-verification; the AWS KMS "
+            "Sign response does not match the signing input or the signing cert "
+            f"(check the KeyId / signing cert pairing): {e}"
+        )
 
 
 def compose_signed_jwt_from_kms_response(input_obj: SignWithAWSKMSInput) -> str:
-    """Assemble the complete signed index.jwt from a finalize-for-aws-kms-sign output + KMS response.
+    """Assemble the complete signed index.jwt from a sign-with-aws-kms-prepare output + KMS response.
 
     Returns:
         The complete ``header.payload.signature`` JWT.
     """
     kms_sign_resp = input_obj.aws_kms_sign_response
+    unsigned_jwt = input_obj.jwt_payload_unsigned
 
-    # NOTE: the AWS KMS REST response encodes `Signature` as base64. (A boto3 caller
-    #       gets raw bytes and must base64-encode them before placing into this JSON.)
+    # NOTE: the AWS KMS REST response encodes `Signature` as base64-encoded.
     try:
-        der_sig = base64.b64decode(kms_sign_resp.signature)
+        der_sig = base64.b64decode(kms_sign_resp.signature, validate=True)
     except Exception as e:
         exit_with_err_msg(f"failed to base64-decode the KMS Signature: {e!r}")
 
     try:
-        return compose_jwt_from_aws_kms_sign_response(
-            input_obj.jwt_payload_unsigned,
+        signed_jwt = compose_jwt_from_aws_kms_sign_response(
+            unsigned_jwt,
             kms_sign_resp=der_sig,
             kms_sign_algorithm=kms_sign_resp.signing_algorithm,
         )
@@ -298,16 +304,19 @@ def compose_signed_jwt_from_kms_response(input_obj: SignWithAWSKMSInput) -> str:
         logger.debug(f"failed to compose signed JWT: {e}", exc_info=e)
         exit_with_err_msg(f"failed to compose signed JWT: {e}")
 
+    _check_aws_kms_sign_resp_against_jwt(signed_jwt, kms_sign_resp)
+    return signed_jwt
 
-def sign_with_aws_kms_cmd_args(
+
+def sign_with_aws_kms_finish_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
     _help_txt = (
-        "Assemble a signed index.jwt from a finalize-for-aws-kms-sign output "
+        "Assemble a signed index.jwt from a sign-with-aws-kms-prepare output "
         "and an AWS KMS Sign response"
     )
     _parser = sub_arg_parser.add_parser(
-        name="sign-with-aws-kms",
+        name="sign-with-aws-kms-finish",
         help=_help_txt,
         description=(
             f"{_help_txt}. Prints the complete signed JWT to stdout, and optionally "
@@ -317,7 +326,7 @@ def sign_with_aws_kms_cmd_args(
     )
     _parser.add_argument(
         "input",
-        help="A JSON object with `JWTPayloadUnsigned` (from finalize-for-aws-kms-sign) and "
+        help="A JSON object with `JWTPayloadUnsigned` (from sign-with-aws-kms-prepare) and "
         "`AWSKMSSignResponse` (the AWS KMS Sign API response). "
         "This arg takes either inline JSON, a file path, or `-` to read from stdin.",
     )
@@ -326,17 +335,17 @@ def sign_with_aws_kms_cmd_args(
         default=None,
         help="If specified, also write the resulting JWT into <image-root>/index.jwt.",
     )
-    _parser.set_defaults(handler=sign_with_aws_kms_cmd)
+    _parser.set_defaults(handler=sign_with_aws_kms_finish_cmd)
 
 
-def sign_with_aws_kms_cmd(args: Namespace) -> None:
-    logger.debug(f"calling {sign_with_aws_kms_cmd.__name__} with {args}")
-    raw_input_json = _load_input(args.input)
+def sign_with_aws_kms_finish_cmd(args: Namespace) -> None:
+    logger.debug(f"calling {sign_with_aws_kms_finish_cmd.__name__} with {args}")
+    raw_input_json = resolve_cli_input_arg(args.input, inline_prefix="{", label="input")
 
     try:
         input_obj = SignWithAWSKMSInput.model_validate_json(raw_input_json)
     except ValidationError as e:
-        logger.debug(f"invalid sign-with-aws-kms input: {e}", exc_info=e)
+        logger.debug(f"invalid sign-with-aws-kms-finish input: {e}", exc_info=e)
         exit_with_err_msg(f"invalid input: {e}")
 
     signed_jwt = compose_signed_jwt_from_kms_response(input_obj)
