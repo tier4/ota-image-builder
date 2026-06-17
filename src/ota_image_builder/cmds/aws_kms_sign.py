@@ -184,15 +184,15 @@ def finalize_for_aws_kms_sign_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
     _help_txt = (
-        "Finalize an OTA image for AWS KMS signing: emit the "
-        "unsigned JWT and a corresponding AWS KMS Sign request template "
-        "for caller to request signing."
+        "Prepare for signing OTA image with AWS KMS signing: set ``signed_at`` for "
+        "the index.json, and then emit the unsigned JWT and a corresponding "
+        "AWS KMS Sign request template for caller to request signing."
     )
     _parser = sub_arg_parser.add_parser(
         name="finalize-for-aws-kms-sign",
         help=_help_txt,
         description=(
-            f"{_help_txt}. The OTA image MUST be finalized first (run `finalize`). "
+            f"{_help_txt} The OTA image MUST be finalized first (run `finalize`). "
             "This finalizes the image signing state and rewrites index.json, then "
             "prints a JSON object with `AWSKMSSignRequestTemplate`, "
             "`JWTPayloadUnsigned` and `SchemaVer` to stdout."
