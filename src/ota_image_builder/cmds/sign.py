@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 import typing
 from base64 import urlsafe_b64encode
 from hashlib import sha256
@@ -35,8 +34,12 @@ from ota_image_libs.v1.index_jwt.utils import compose_index_jwt
 from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
 from ota_image_builder._consts import EMPTY_FILE_SHA256
 
+from ._utils import resolve_cli_input_arg
+
 if TYPE_CHECKING:
     from argparse import ArgumentParser, Namespace, _SubParsersAction
+
+    from ota_image_libs.v1.image_index.schema import ImageIndex
 
 
 logger = logging.getLogger(__name__)
@@ -52,6 +55,43 @@ def load_cert_chains(ee_fpath: Path, ca_fpaths: list[Path]) -> X5cX509CertChain:
     return _res
 
 
+def load_cert_chain_from_args(args: Namespace) -> X5cX509CertChain:
+    """Validate the ``--sign-cert``/``--ca-cert`` file args and load the cert chain."""
+    sign_cert_f = Path(args.sign_cert)
+    ca_certs_fs = [Path(_ca_cert) for _ca_cert in (args.ca_cert or [])]
+
+    if not sign_cert_f.is_file():
+        exit_with_err_msg(f"{sign_cert_f=} not found.")
+    for _ca_cert in ca_certs_fs:
+        if not _ca_cert.is_file():
+            exit_with_err_msg(f"CA cert {_ca_cert} is specified, but not found.")
+
+    try:
+        return load_cert_chains(sign_cert_f, ca_certs_fs)
+    except Exception as e:
+        logger.error(f"failed to load sign cert chain: {e}", exc_info=e)
+        exit_with_err_msg(
+            f"failed to load sign cert chain {sign_cert_f} and {ca_certs_fs}"
+        )
+
+
+def seal_image_before_sign(
+    image_root: Path, *, force_sign: bool
+) -> ImageIndex.Descriptor:
+    """Seal the image index.json before signing the index.json.
+
+    This is done by adding `signed_at` annotation to the index.json.
+    """
+    _index_helper = ImageIndexHelper(image_root)
+    if not _index_helper.image_index.image_finalized:
+        exit_with_err_msg(
+            "ERR: image is not yet finalized, run the `finalize` command first, abort!"
+        )
+    _index_helper.image_index.finalize_signing_image(force_sign=force_sign)
+    _, _index_descriptor = _index_helper.sync_index()
+    return _index_descriptor
+
+
 def sign_image(
     image_root: Path,
     *,
@@ -61,13 +101,7 @@ def sign_image(
     sign_key_passwd: bytes | None = None,
 ) -> None:
     """Sign the image, and write the output index.jwt into the OTA image root."""
-    _index_helper = ImageIndexHelper(image_root)
-    if not _index_helper.image_index.image_finalized:
-        exit_with_err_msg(
-            "ERR: image is not yet finalized, thus cannot be signed, abort!"
-        )
-    _index_helper.image_index.finalize_signing_image(force_sign=force_sign)
-    _, _index_descriptor = _index_helper.sync_index()
+    _index_descriptor = seal_image_before_sign(image_root, force_sign=force_sign)
 
     _index_jwt = compose_index_jwt(
         _index_descriptor,
@@ -218,26 +252,6 @@ def sign_cmd_args(
     sign_cmd_arg_parser.set_defaults(handler=sign_cmd)
 
 
-def _load_private_key(_in: str | None) -> bytes:
-    if not _in:
-        exit_with_err_msg("empty input sign key, abort!")
-
-    if _in.startswith("-----BEGIN"):
-        return _in.encode()
-    if _in == "-":
-        try:
-            return sys.stdin.buffer.read()
-        except Exception as e:
-            exit_with_err_msg(f"failed to read private key from stdin: {e!r}")
-
-    try:
-        return Path(_in).read_bytes()
-    except FileNotFoundError:
-        exit_with_err_msg("the specified key file doesn't exist!")
-    except Exception as e:
-        exit_with_err_msg(f"failed to read private key: {e!r}")
-
-
 def sign_cmd(args: Namespace) -> None:
     logger.debug(f"calling {sign_cmd.__name__} with {args}")
     image_root = Path(args.image_root)
@@ -245,26 +259,18 @@ def sign_cmd(args: Namespace) -> None:
         exit_with_err_msg(f"{image_root} doesn't hold a valid OTA image.")
 
     sign_cert_f = Path(args.sign_cert)
-    ca_certs_fs = [Path(_ca_cert) for _ca_cert in args.ca_cert]
-
-    if not sign_cert_f.is_file():
-        exit_with_err_msg(f"{sign_cert_f=} not found.")
-    for _ca_cert in ca_certs_fs:
-        if not _ca_cert.is_file():
-            exit_with_err_msg(f"CA cert {_ca_cert} is specified, but not found.")
-
-    try:
-        loaded_cert_chain = load_cert_chains(sign_cert_f, ca_certs_fs)
-    except Exception as e:
-        logger.debug(f"failed to load sign cert chain: {e}", exc_info=e)
-        exit_with_err_msg(
-            f"failed to load sign cert chain {sign_cert_f} and {ca_certs_fs}"
-        )
+    loaded_cert_chain = load_cert_chain_from_args(args)
 
     logger.info(f"Will sign OTA image at {image_root} ...")
 
     sign_key_passwd = args.sign_key_passwd.encode() if args.sign_key_passwd else None
-    sign_key = _load_private_key(args.sign_key)
+    sign_key = resolve_cli_input_arg(
+        args.sign_key,
+        inline_prefix="-----BEGIN",  # hint for PEM format private key
+        label="--sign-key",
+        binary=True,
+    )
+
     try:
         sign_image(
             image_root,
