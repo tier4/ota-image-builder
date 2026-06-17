@@ -15,8 +15,9 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 
 import yaml
 from pydantic import BaseModel, ConfigDict
@@ -31,6 +32,50 @@ MODEL_WITH_ALIAS = ConfigDict(
     serialize_by_alias=True,
 )
 """Enable alias for field validation and serialization."""
+
+
+@overload
+def resolve_cli_input_arg(
+    value: str | None, *, inline_prefix: str, label: str, binary: Literal[False] = ...
+) -> str: ...
+
+
+@overload
+def resolve_cli_input_arg(
+    value: str | None, *, inline_prefix: str, label: str, binary: Literal[True]
+) -> bytes: ...
+
+
+def resolve_cli_input_arg(
+    value: str | None, *, inline_prefix: str, label: str, binary: bool = False
+) -> str | bytes:
+    """Resolve a CLI arg that may be inline content, a file path, or ``-`` (stdin).
+
+    The arg is treated as inline content when (after stripping leading whitespace) it
+    starts with ``inline_prefix`` (e.g. ``{`` for JSON, ``-----BEGIN`` for a PEM key);
+    as stdin when it is exactly ``-``; otherwise as a path to read. ``label`` names the
+    arg in the error messages. With ``binary=True`` the content is returned as ``bytes``
+    (stdin/file read in binary mode), otherwise as decoded text.
+    """
+    if not value:
+        exit_with_err_msg(f"empty {label}, abort!")
+
+    if value.lstrip().startswith(inline_prefix):
+        return value.encode() if binary else value
+
+    if value == "-":
+        try:
+            return sys.stdin.buffer.read() if binary else sys.stdin.read()
+        except Exception as e:
+            exit_with_err_msg(f"failed to read {label} from stdin: {e!r}")
+
+    _f = Path(value)
+    try:
+        return _f.read_bytes() if binary else _f.read_text()
+    except FileNotFoundError:
+        exit_with_err_msg(f"the specified {label} file doesn't exist!")
+    except Exception as e:
+        exit_with_err_msg(f"failed to read {label} file: {e!r}")
 
 
 def validate_annotations(
