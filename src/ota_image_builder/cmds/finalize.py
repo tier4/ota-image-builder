@@ -52,12 +52,10 @@ logger = logging.getLogger(__name__)
 def finalize_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
+    _help_txt = "Finalize and optimize the OTA image, make it ready for signing"
     finalize_cmd_args = sub_arg_parser.add_parser(
         name="finalize",
-        help=(
-            _help_txt
-            := "Finalize and optimize the OTA image, make it ready for signing"
-        ),
+        help=_help_txt,
         description=_help_txt,
         parents=parent_parser,
     )

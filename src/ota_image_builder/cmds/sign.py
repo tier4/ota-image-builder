@@ -171,9 +171,10 @@ def _add_compat_to_image(
 def sign_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
+    _help_txt = "Sign an OTA image with sign cert chain and sign key"
     sign_cmd_arg_parser = sub_arg_parser.add_parser(
         name="sign",
-        help=(_help_txt := "Sign an OTA image with sign cert chain and sign key"),
+        help=_help_txt,
         description=_help_txt,
         parents=parent_parser,
     )
