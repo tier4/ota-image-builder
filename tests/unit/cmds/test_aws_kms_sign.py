@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import datetime
 import hashlib
@@ -55,9 +56,11 @@ from ota_image_builder.cmds.aws_kms_sign import (
     _load_input_json,
     _parse_sign_input,
     compose_signed_jwt_from_kms_response,
-    gen_raw_jwt,
-    gen_raw_jwt_cmd,
+    finalize_for_aws_kms_sign,
+    finalize_for_aws_kms_sign_cmd,
+    finalize_for_aws_kms_sign_cmd_args,
     sign_with_aws_kms_cmd,
+    sign_with_aws_kms_cmd_args,
 )
 
 # ------ test helpers ------ #
@@ -149,14 +152,14 @@ def _simulate_kms_sign_response(
     }
 
 
-# ------ gen_raw_jwt ------ #
+# ------ finalize_for_aws_kms_sign ------ #
 
 
-class TestGenRawJwt:
-    """Tests for the gen_raw_jwt core function."""
+class TestFinalizeForAWSKMSSign:
+    """Tests for the finalize_for_aws_kms_sign core function."""
 
     def test_not_finalized_exits(self, tmp_path: Path):
-        """gen_raw_jwt must reject an image that has not been finalized."""
+        """finalize_for_aws_kms_sign must reject an image that has not been finalized."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
 
@@ -168,14 +171,14 @@ class TestGenRawJwt:
             mock_helper_class.return_value = mock_helper
 
             with pytest.raises(SystemExit):
-                gen_raw_jwt(
+                finalize_for_aws_kms_sign(
                     image_root, sign_cert_chain=_make_ee_chain(), force_sign=False
                 )
             # must not advance to mutating the signing state
             mock_helper.image_index.finalize_signing_image.assert_not_called()
 
     def test_output_schema(self, tmp_path: Path):
-        """gen_raw_jwt returns a GenRawJWTOutput with the documented content."""
+        """finalize_for_aws_kms_sign returns a FinalizeForAWSKMSSignOutput with the documented content."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
         descriptor = ImageIndex.Descriptor(digest=Sha256Digest("a" * 64), size=42)
@@ -184,7 +187,7 @@ class TestGenRawJwt:
             "ota_image_builder.cmds.aws_kms_sign.ImageIndexHelper",
             return_value=_patch_index_helper(descriptor),
         ):
-            result = gen_raw_jwt(
+            result = finalize_for_aws_kms_sign(
                 image_root, sign_cert_chain=_make_ee_chain(), force_sign=False
             )
 
@@ -214,7 +217,7 @@ class TestGenRawJwt:
             "ota_image_builder.cmds.aws_kms_sign.ImageIndexHelper",
             return_value=_patch_index_helper(descriptor),
         ):
-            result = gen_raw_jwt(
+            result = finalize_for_aws_kms_sign(
                 image_root, sign_cert_chain=_make_ee_chain(), force_sign=False
             )
 
@@ -229,9 +232,31 @@ class TestGenRawJwt:
         # StrEnum serializes to its plain string value.
         assert wire["AWSKMSSignRequest"]["SigningAlgorithm"] == "ECDSA_SHA_256"
 
+    def test_unsupported_aws_algorithm_exits(self, tmp_path: Path):
+        """The defensive guard exits if the lib returns an unmappable algorithm."""
+        image_root = tmp_path / "ota_image"
+        image_root.mkdir()
+        descriptor = ImageIndex.Descriptor(digest=Sha256Digest("a" * 64), size=42)
 
-class TestGenRawJwtCmd:
-    """Tests for the gen_raw_jwt_cmd handler (arg validation)."""
+        with (
+            patch(
+                "ota_image_builder.cmds.aws_kms_sign.ImageIndexHelper",
+                return_value=_patch_index_helper(descriptor),
+            ),
+            patch(
+                "ota_image_builder.cmds.aws_kms_sign."
+                "compose_unsigned_index_jwt_for_aws_kms_sign",
+                return_value=("BOGUS_ALG", "header.payload"),
+            ),
+            pytest.raises(SystemExit),
+        ):
+            finalize_for_aws_kms_sign(
+                image_root, sign_cert_chain=_make_ee_chain(), force_sign=False
+            )
+
+
+class TestFinalizeForAWSKMSSignCmd:
+    """Tests for the finalize_for_aws_kms_sign_cmd handler (arg validation)."""
 
     def test_invalid_ota_image_exits(self, tmp_path: Path):
         image_root = tmp_path / "invalid"
@@ -243,7 +268,7 @@ class TestGenRawJwtCmd:
             force_sign=False,
         )
         with pytest.raises(SystemExit):
-            gen_raw_jwt_cmd(args)
+            finalize_for_aws_kms_sign_cmd(args)
 
     def test_nonexistent_sign_cert_exits(self, tmp_path: Path):
         image_root = tmp_path / "ota_image"
@@ -259,7 +284,130 @@ class TestGenRawJwtCmd:
             return_value=True,
         ):
             with pytest.raises(SystemExit):
-                gen_raw_jwt_cmd(args)
+                finalize_for_aws_kms_sign_cmd(args)
+
+    def test_nonexistent_ca_cert_exits(self, tmp_path: Path):
+        _, ee_pem, _ = _generate_test_ca_and_ee_chain()
+        cert_f = tmp_path / "ee.pem"
+        cert_f.write_bytes(ee_pem)
+        image_root = tmp_path / "ota_image"
+        image_root.mkdir()
+        args = Namespace(
+            image_root=str(image_root),
+            sign_cert=str(cert_f),
+            ca_cert=[str(tmp_path / "missing_ca.pem")],
+            force_sign=False,
+        )
+        with patch(
+            "ota_image_builder.cmds.aws_kms_sign.check_if_valid_ota_image",
+            return_value=True,
+        ):
+            with pytest.raises(SystemExit):
+                finalize_for_aws_kms_sign_cmd(args)
+
+    def test_existing_ca_cert_is_iterated(self, tmp_path: Path):
+        """An existing --ca-cert passes the file check (loop iterates the truthy path)."""
+        ca_pem, ee_pem, _ = _generate_test_ca_and_ee_chain()
+        cert_f = tmp_path / "ee.pem"
+        cert_f.write_bytes(ee_pem)
+        ca_f = tmp_path / "ca.pem"
+        ca_f.write_bytes(ca_pem)
+        image_root = tmp_path / "ota_image"
+        image_root.mkdir()
+        args = Namespace(
+            image_root=str(image_root),
+            sign_cert=str(cert_f),
+            ca_cert=[str(ca_f)],
+            force_sign=False,
+        )
+        with patch(
+            "ota_image_builder.cmds.aws_kms_sign.check_if_valid_ota_image",
+            return_value=True,
+        ):
+            # The CA file exists (loop iterates past the is_file check), but a
+            # self-signed root is rejected by load_cert_chains -> SystemExit.
+            with pytest.raises(SystemExit):
+                finalize_for_aws_kms_sign_cmd(args)
+
+    def test_cert_chain_load_failure_exits(self, tmp_path: Path):
+        cert_f = tmp_path / "bad.pem"
+        cert_f.write_text("not a valid cert")
+        image_root = tmp_path / "ota_image"
+        image_root.mkdir()
+        args = Namespace(
+            image_root=str(image_root),
+            sign_cert=str(cert_f),
+            ca_cert=None,
+            force_sign=False,
+        )
+        with patch(
+            "ota_image_builder.cmds.aws_kms_sign.check_if_valid_ota_image",
+            return_value=True,
+        ):
+            with pytest.raises(SystemExit):
+                finalize_for_aws_kms_sign_cmd(args)
+
+    def test_success_prints_json(self, tmp_path: Path, capsys):
+        _, ee_pem, _ = _generate_test_ca_and_ee_chain()
+        cert_f = tmp_path / "ee.pem"
+        cert_f.write_bytes(ee_pem)
+        image_root = tmp_path / "ota_image"
+        image_root.mkdir()
+        descriptor = ImageIndex.Descriptor(digest=Sha256Digest("a" * 64), size=42)
+        args = Namespace(
+            image_root=str(image_root),
+            sign_cert=str(cert_f),
+            ca_cert=None,
+            force_sign=False,
+        )
+        with (
+            patch(
+                "ota_image_builder.cmds.aws_kms_sign.check_if_valid_ota_image",
+                return_value=True,
+            ),
+            patch(
+                "ota_image_builder.cmds.aws_kms_sign.ImageIndexHelper",
+                return_value=_patch_index_helper(descriptor),
+            ),
+        ):
+            finalize_for_aws_kms_sign_cmd(args)
+
+        # stdout must be the well-formed JSON output object only.
+        parsed = json.loads(capsys.readouterr().out)
+        assert set(parsed) == {"AWSKMSSignRequest", "JWTPayloadUnsigned", "SchemaVer"}
+        assert parsed["SchemaVer"] == 1
+
+    def test_runtime_error_during_finalize_exits(self, tmp_path: Path):
+        """A non-exit error from the core routine is reported and exits non-zero."""
+        _, ee_pem, _ = _generate_test_ca_and_ee_chain()
+        cert_f = tmp_path / "ee.pem"
+        cert_f.write_bytes(ee_pem)
+        image_root = tmp_path / "ota_image"
+        image_root.mkdir()
+        args = Namespace(
+            image_root=str(image_root),
+            sign_cert=str(cert_f),
+            ca_cert=None,
+            force_sign=False,
+        )
+        helper = MagicMock()
+        helper.image_index.image_finalized = True
+        # e.g. already-signed image without --force-sign raises ValueError.
+        helper.image_index.finalize_signing_image.side_effect = ValueError(
+            "already signed"
+        )
+        with (
+            patch(
+                "ota_image_builder.cmds.aws_kms_sign.check_if_valid_ota_image",
+                return_value=True,
+            ),
+            patch(
+                "ota_image_builder.cmds.aws_kms_sign.ImageIndexHelper",
+                return_value=helper,
+            ),
+        ):
+            with pytest.raises(SystemExit):
+                finalize_for_aws_kms_sign_cmd(args)
 
 
 # ------ _load_input_json ------ #
@@ -297,9 +445,29 @@ class TestLoadInputJson:
         with pytest.raises(SystemExit):
             _load_input_json("{not json}")
 
-    def test_non_object_json_exits(self):
+    def test_non_object_json_from_file_exits(self, tmp_path: Path):
+        # A JSON array does not start with "{", so it's read as a file path; put it in
+        # a file so parsing succeeds and the "must be a JSON object" check is reached.
+        f = tmp_path / "arr.json"
+        f.write_text("[1, 2, 3]")
         with pytest.raises(SystemExit):
-            _load_input_json("[1, 2, 3]")
+            _load_input_json(str(f))
+
+    def test_unreadable_file_exits(self, tmp_path: Path):
+        # Reading a directory raises (IsADirectoryError) -> generic read-failure path.
+        a_dir = tmp_path / "a_dir"
+        a_dir.mkdir()
+        with pytest.raises(SystemExit):
+            _load_input_json(str(a_dir))
+
+    def test_stdin_read_exception_exits(self, monkeypatch):
+        class _BadStdin:
+            def read(self):
+                raise OSError("stdin boom")
+
+        monkeypatch.setattr("sys.stdin", _BadStdin())
+        with pytest.raises(SystemExit):
+            _load_input_json("-")
 
 
 # ------ _parse_sign_input (pydantic validation) ------ #
@@ -427,12 +595,106 @@ class TestSignWithAwsKmsCmd:
             with pytest.raises(SystemExit):
                 sign_with_aws_kms_cmd(args)
 
+    def test_prints_jwt_without_image_root(self, tmp_path: Path, capsys):
+        """Without --image-root, the JWT is only printed (no index.jwt written)."""
+        _, ee_pem, ee_key_pem = _generate_test_ca_and_ee_chain()
+        chain = X5cX509CertChain()
+        chain.add_ee(load_pem_x509_certificate(ee_pem))
+
+        image_root = tmp_path / "ota_image"
+        image_root.mkdir()
+        descriptor = ImageIndex.Descriptor(digest=Sha256Digest("d" * 64), size=512)
+
+        with patch(
+            "ota_image_builder.cmds.aws_kms_sign.ImageIndexHelper",
+            return_value=_patch_index_helper(descriptor),
+        ):
+            raw = finalize_for_aws_kms_sign(
+                image_root, sign_cert_chain=chain, force_sign=False
+            )
+
+        signing_input = raw.jwt_payload_unsigned
+        kms_resp = _simulate_kms_sign_response(signing_input, ee_key_pem)
+        input_obj = {
+            "JWTPayloadUnsigned": signing_input,
+            "AWSKMSSignResponse": kms_resp,
+        }
+
+        args = Namespace(input=json.dumps(input_obj), image_root=None)
+        sign_with_aws_kms_cmd(args)
+
+        signed_jwt = capsys.readouterr().out.strip()
+        assert signed_jwt.count(".") == 2
+        # nothing should be written to the image.
+        assert not (image_root / "index.jwt").exists()
+
+        extracted_chain = get_index_jwt_sign_cert_chain(signed_jwt)
+        claims = decode_index_jwt_with_verification(signed_jwt, extracted_chain)
+        assert claims.image_index.size == descriptor.size
+
+
+# ------ arg-parser registration ------ #
+
+
+class TestCmdArgsRegistration:
+    """Verify the subcommands register their args and handlers correctly."""
+
+    def test_finalize_for_aws_kms_sign_cmd_args(self):
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers()
+        finalize_for_aws_kms_sign_cmd_args(sub)
+
+        args = parser.parse_args(
+            [
+                "finalize-for-aws-kms-sign",
+                "--sign-cert",
+                "ee.pem",
+                "--ca-cert",
+                "ca1.pem",
+                "--ca-cert",
+                "ca2.pem",
+                "--force-sign",
+                "/img",
+            ]
+        )
+        assert args.handler is finalize_for_aws_kms_sign_cmd
+        assert args.sign_cert == "ee.pem"
+        assert args.ca_cert == ["ca1.pem", "ca2.pem"]
+        assert args.force_sign is True
+        assert args.image_root == "/img"
+
+    def test_finalize_for_aws_kms_sign_cmd_args_requires_sign_cert(self):
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers()
+        finalize_for_aws_kms_sign_cmd_args(sub)
+        # --sign-cert is required -> argparse exits.
+        with pytest.raises(SystemExit):
+            parser.parse_args(["finalize-for-aws-kms-sign", "/img"])
+
+    def test_sign_with_aws_kms_cmd_args(self):
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers()
+        sign_with_aws_kms_cmd_args(sub)
+
+        args = parser.parse_args(["sign-with-aws-kms", "--image-root", "/img", "{}"])
+        assert args.handler is sign_with_aws_kms_cmd
+        assert args.input == "{}"
+        assert args.image_root == "/img"
+
+    def test_sign_with_aws_kms_cmd_args_image_root_defaults_none(self):
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers()
+        sign_with_aws_kms_cmd_args(sub)
+
+        args = parser.parse_args(["sign-with-aws-kms", "{}"])
+        assert args.image_root is None
+
 
 # ------ full round trip ------ #
 
 
 class TestRoundTrip:
-    """End-to-end: gen-raw-jwt -> simulate KMS -> sign-with-aws-kms -> verify.
+    """End-to-end: finalize-for-aws-kms-sign -> simulate KMS -> sign-with-aws-kms -> verify.
 
     Exercises the real cryptography path (no mocking of the compose helpers). The KMS
     Sign call is simulated locally with the EE private key, producing a DER ECDSA
@@ -452,7 +714,9 @@ class TestRoundTrip:
             "ota_image_builder.cmds.aws_kms_sign.ImageIndexHelper",
             return_value=_patch_index_helper(descriptor),
         ):
-            raw = gen_raw_jwt(image_root, sign_cert_chain=chain, force_sign=False)
+            raw = finalize_for_aws_kms_sign(
+                image_root, sign_cert_chain=chain, force_sign=False
+            )
 
         signing_input = raw.jwt_payload_unsigned
         kms_resp = _simulate_kms_sign_response(signing_input, ee_key_pem)
@@ -489,7 +753,9 @@ class TestRoundTrip:
             "ota_image_builder.cmds.aws_kms_sign.ImageIndexHelper",
             return_value=_patch_index_helper(descriptor),
         ):
-            raw = gen_raw_jwt(image_root, sign_cert_chain=chain, force_sign=False)
+            raw = finalize_for_aws_kms_sign(
+                image_root, sign_cert_chain=chain, force_sign=False
+            )
 
         signing_input = raw.jwt_payload_unsigned
         kms_resp = _simulate_kms_sign_response(signing_input, ee_key_pem)

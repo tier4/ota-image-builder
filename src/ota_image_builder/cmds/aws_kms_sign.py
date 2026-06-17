@@ -15,7 +15,7 @@
 
 Two CLI subcommands are provided for the support:
 
-1. ``gen-raw-jwt``: finalizes the image signing state, rewrites ``index.json`` and emits
+1. ``finalize-for-aws-kms-sign``: finalizes the image signing state, rewrites ``index.json`` and emits
    the unsigned JWT signing input (``header.payload``) together with a ready-to-fill
    AWS KMS ``Sign`` request template.
 2. ``sign-with-aws-kms``: takes that unsigned signing input plus the AWS KMS ``Sign``
@@ -28,11 +28,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from ota_image_libs._crypto.aws_kms import (
     AWSKMSSignAlgorithm,
@@ -48,6 +47,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
 from ota_image_builder.cmds.sign import load_cert_chains
 
+from ._utils import MODEL_WITH_ALIAS
+
 if TYPE_CHECKING:
     from argparse import ArgumentParser, Namespace, _SubParsersAction
 
@@ -56,10 +57,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# We always compose the request with MessageType=DIGEST: the signing input embeds the
-# full x5c cert chain in the JWT header and will typically exceed AWS KMS's 4096-byte
-# cap for MessageType=RAW. Signing the pre-computed digest yields an equally valid
-# signature regardless of input size.
+# We always compose the request with MessageType=DIGEST
 KMS_MESSAGE_TYPE_DIGEST = "DIGEST"
 
 # Map an AWS KMS ECDSA signing algorithm to the hashlib constructor used to pre-hash
@@ -70,14 +68,10 @@ _AWS_ALG_HASHLIB_MAPPING = {
     AWSKMSSignAlgorithm.ECDSA_SHA_512: hashlib.sha512,
 }
 
-# Validate both by field name and by alias so the models accept snake_case names (when
-# constructed in Python) and the PascalCase wire aliases (when parsed from JSON), while
-# serialization with by_alias=True emits the wire form.
-_WIRE_MODEL_CONFIG = ConfigDict(validate_by_name=True, validate_by_alias=True)
-
 
 #
 # ------ message schemas ------ #
+#
 # Wire field names follow the AWS KMS Sign API.
 # See https://docs.aws.amazon.com/kms/latest/APIReference/API_Sign.html
 #
@@ -90,7 +84,7 @@ class AWSKMSSignRequestTemplate(BaseModel):
     the KMS ``Sign`` API. See ``API_Sign_RequestSyntax``.
     """
 
-    model_config = _WIRE_MODEL_CONFIG
+    model_config = MODEL_WITH_ALIAS
 
     message: str = Field(alias="Message")
     """Base64-encoded SHA-* digest of the JWT signing input (for MessageType=DIGEST)."""
@@ -98,10 +92,10 @@ class AWSKMSSignRequestTemplate(BaseModel):
     signing_algorithm: AWSKMSSignAlgorithm = Field(alias="SigningAlgorithm")
 
 
-class GenRawJWTOutput(BaseModel):
-    """The ``gen-raw-jwt`` output object printed to stdout."""
+class FinalizeForAWSKMSSignOutput(BaseModel):
+    """The ``finalize-for-aws-kms-sign`` output object printed to stdout."""
 
-    model_config = _WIRE_MODEL_CONFIG
+    model_config = MODEL_WITH_ALIAS
 
     aws_kms_sign_request: AWSKMSSignRequestTemplate = Field(alias="AWSKMSSignRequest")
     jwt_payload_unsigned: str = Field(alias="JWTPayloadUnsigned")
@@ -116,9 +110,7 @@ class AWSKMSSignResponse(BaseModel):
     """
 
     # NOTE: extra="ignore" so a verbatim KMS response (with KeyId, etc.) validates.
-    model_config = ConfigDict(
-        validate_by_name=True, validate_by_alias=True, extra="ignore"
-    )
+    model_config = ConfigDict(MODEL_WITH_ALIAS, extra="ignore")
 
     signature: str = Field(alias="Signature")
     """Base64-encoded DER ECDSA signature, as in the KMS REST response."""
@@ -128,39 +120,39 @@ class AWSKMSSignResponse(BaseModel):
 class SignWithAWSKMSInput(BaseModel):
     """The ``sign-with-aws-kms`` input object."""
 
-    model_config = _WIRE_MODEL_CONFIG
+    model_config = MODEL_WITH_ALIAS
 
     jwt_payload_unsigned: str = Field(alias="JWTPayloadUnsigned")
     aws_kms_sign_response: AWSKMSSignResponse = Field(alias="AWSKMSSignResponse")
 
 
 #
-# ------ gen-raw-jwt ------ #
+# ------ finalize-for-aws-kms-sign ------ #
 #
 
 
-def gen_raw_jwt(
+def finalize_for_aws_kms_sign(
     image_root: Path,
     *,
     sign_cert_chain: X5cX509CertChain,
     force_sign: bool,
-) -> GenRawJWTOutput:
+) -> FinalizeForAWSKMSSignOutput:
     """Finalize the signing state and compose the unsigned JWT + KMS Sign request.
 
     NOTE: this mutates the OTA image. It sets the ``signed_at`` annotation and rewrites
         ``index.json`` so the descriptor embedded into the returned JWT matches the
         on-disk ``index.json``. The returned ``JWTPayloadUnsigned`` must be paired with
-        the KMS ``Sign`` response of the *same* ``gen-raw-jwt`` run.
+        the KMS ``Sign`` response of the *same* ``finalize-for-aws-kms-sign`` run.
 
     Returns:
-        The gen-raw-jwt output with the ``AWSKMSSignRequest`` template, the
+        The finalize-for-aws-kms-sign output with the ``AWSKMSSignRequest`` template, the
         ``JWTPayloadUnsigned`` signing input and ``SchemaVer``.
     """
     _index_helper = ImageIndexHelper(image_root)
     if not _index_helper.image_index.image_finalized:
         exit_with_err_msg(
             "ERR: image is not yet finalized, "
-            "run the `finalize` command before `gen-raw-jwt`, abort!"
+            "run the `finalize` command before `finalize-for-aws-kms-sign`, abort!"
         )
     _index_helper.image_index.finalize_signing_image(force_sign=force_sign)
     _, _index_descriptor = _index_helper.sync_index()
@@ -180,7 +172,7 @@ def gen_raw_jwt(
     # NOTE: construct via the wire aliases (validate_by_alias=True). This also keeps
     #       static type checkers happy, since the synthesized __init__ for an aliased
     #       model is keyed on the aliases.
-    return GenRawJWTOutput(
+    return FinalizeForAWSKMSSignOutput(
         AWSKMSSignRequest=AWSKMSSignRequestTemplate(
             Message=_message_b64,
             SigningAlgorithm=aws_alg,
@@ -189,14 +181,14 @@ def gen_raw_jwt(
     )
 
 
-def gen_raw_jwt_cmd_args(
+def finalize_for_aws_kms_sign_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
     _parser = sub_arg_parser.add_parser(
-        name="gen-raw-jwt",
+        name="finalize-for-aws-kms-sign",
         help=(
-            _help_txt := "Generate the unsigned JWT and an AWS KMS Sign request "
-            "template for signing an OTA image with AWS KMS"
+            _help_txt := "Finalize an OTA image for AWS KMS signing: emit the "
+            "unsigned JWT and an AWS KMS Sign request template"
         ),
         description=(
             f"{_help_txt}. The OTA image MUST be finalized first (run `finalize`). "
@@ -226,11 +218,11 @@ def gen_raw_jwt_cmd_args(
         "image_root",
         help="The folder that holds the finalized OTA image to be signed.",
     )
-    _parser.set_defaults(handler=gen_raw_jwt_cmd)
+    _parser.set_defaults(handler=finalize_for_aws_kms_sign_cmd)
 
 
-def gen_raw_jwt_cmd(args: Namespace) -> None:
-    logger.debug(f"calling {gen_raw_jwt_cmd.__name__} with {args}")
+def finalize_for_aws_kms_sign_cmd(args: Namespace) -> None:
+    logger.debug(f"calling {finalize_for_aws_kms_sign_cmd.__name__} with {args}")
     image_root = Path(args.image_root)
     if not check_if_valid_ota_image(image_root):
         exit_with_err_msg(f"{image_root} doesn't hold a valid OTA image.")
@@ -256,7 +248,7 @@ def gen_raw_jwt_cmd(args: Namespace) -> None:
         f"Generating raw JWT and AWS KMS Sign request template for {image_root} ..."
     )
     try:
-        result = gen_raw_jwt(
+        result = finalize_for_aws_kms_sign(
             image_root,
             sign_cert_chain=loaded_cert_chain,
             force_sign=args.force_sign,
@@ -264,10 +256,7 @@ def gen_raw_jwt_cmd(args: Namespace) -> None:
     except Exception as e:
         logger.debug(f"failed to generate raw JWT: {e}", exc_info=e)
         exit_with_err_msg(f"failed to generate raw JWT: {e}")
-
-    # NOTE: only the JSON result goes to stdout (logs go to stderr) so the output stays
-    #       clean and machine-parseable.
-    print(result.model_dump_json(by_alias=True, indent=2))
+    print(result.model_dump_json(indent=2))
 
 
 #
@@ -275,7 +264,7 @@ def gen_raw_jwt_cmd(args: Namespace) -> None:
 #
 
 
-def _load_input_json(_in: str | None) -> dict[str, Any]:
+def _load_input(_in: str | None) -> str:
     """Resolve the ``input`` arg into a parsed JSON object.
 
     Accepts inline JSON (a string starting with ``{``), a file path, or ``-`` to read
@@ -285,41 +274,24 @@ def _load_input_json(_in: str | None) -> dict[str, Any]:
         exit_with_err_msg("empty input, abort!")
 
     if _in.lstrip().startswith("{"):
-        _raw = _in
-    elif _in == "-":
+        return _in
+
+    if _in == "-":
         try:
-            _raw = sys.stdin.read()
+            return sys.stdin.read()
         except Exception as e:
             exit_with_err_msg(f"failed to read input from stdin: {e!r}")
-    else:
-        try:
-            _raw = Path(_in).read_text()
-        except FileNotFoundError:
-            exit_with_err_msg("the specified input file doesn't exist!")
-        except Exception as e:
-            exit_with_err_msg(f"failed to read input file: {e!r}")
 
     try:
-        _loaded = json.loads(_raw)
+        return Path(_in).read_text()
+    except FileNotFoundError:
+        exit_with_err_msg("the specified input file doesn't exist!")
     except Exception as e:
-        exit_with_err_msg(f"input is not valid JSON: {e!r}")
-
-    if not isinstance(_loaded, dict):
-        exit_with_err_msg("input must be a JSON object.")
-    return _loaded
-
-
-def _parse_sign_input(raw: dict[str, Any]) -> SignWithAWSKMSInput:
-    """Validate the raw input object against the ``SignWithAWSKMSInput`` schema."""
-    try:
-        return SignWithAWSKMSInput.model_validate(raw)
-    except ValidationError as e:
-        logger.debug(f"invalid sign-with-aws-kms input: {e}", exc_info=e)
-        exit_with_err_msg(f"invalid input: {e}")
+        exit_with_err_msg(f"failed to read input file: {e!r}")
 
 
 def compose_signed_jwt_from_kms_response(input_obj: SignWithAWSKMSInput) -> str:
-    """Assemble the complete signed index.jwt from a gen-raw-jwt output + KMS response.
+    """Assemble the complete signed index.jwt from a finalize-for-aws-kms-sign output + KMS response.
 
     Returns:
         The complete ``header.payload.signature`` JWT.
@@ -350,7 +322,8 @@ def sign_with_aws_kms_cmd_args(
     _parser = sub_arg_parser.add_parser(
         name="sign-with-aws-kms",
         help=(
-            _help_txt := "Assemble a signed index.jwt from a gen-raw-jwt output "
+            _help_txt
+            := "Assemble a signed index.jwt from a finalize-for-aws-kms-sign output "
             "and an AWS KMS Sign response"
         ),
         description=(
@@ -361,7 +334,7 @@ def sign_with_aws_kms_cmd_args(
     )
     _parser.add_argument(
         "input",
-        help="A JSON object with `JWTPayloadUnsigned` (from gen-raw-jwt) and "
+        help="A JSON object with `JWTPayloadUnsigned` (from finalize-for-aws-kms-sign) and "
         "`AWSKMSSignResponse` (the AWS KMS Sign API response). "
         "This arg takes either inline JSON, a file path, or `-` to read from stdin.",
     )
@@ -375,8 +348,14 @@ def sign_with_aws_kms_cmd_args(
 
 def sign_with_aws_kms_cmd(args: Namespace) -> None:
     logger.debug(f"calling {sign_with_aws_kms_cmd.__name__} with {args}")
-    raw_input = _load_input_json(args.input)
-    input_obj = _parse_sign_input(raw_input)
+    raw_input_json = _load_input(args.input)
+
+    try:
+        input_obj = SignWithAWSKMSInput.model_validate_json(raw_input_json)
+    except ValidationError as e:
+        logger.debug(f"invalid sign-with-aws-kms input: {e}", exc_info=e)
+        exit_with_err_msg(f"invalid input: {e}")
+
     signed_jwt = compose_signed_jwt_from_kms_response(input_obj)
 
     if args.image_root is not None:

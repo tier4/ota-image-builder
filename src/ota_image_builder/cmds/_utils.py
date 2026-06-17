@@ -19,11 +19,18 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from ota_image_builder._common import exit_with_err_msg
 
 logger = logging.getLogger(__name__)
+
+MODEL_WITH_ALIAS = ConfigDict(
+    validate_by_name=True,
+    validate_by_alias=True,
+    serialize_by_alias=True,
+)
+"""Enable alias for field validation and serialization."""
 
 
 def validate_annotations(
