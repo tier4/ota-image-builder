@@ -48,13 +48,12 @@ from ota_image_libs.v1.index_jwt.utils import (
     decode_index_jwt_with_verification,
     get_index_jwt_sign_cert_chain,
 )
+from pydantic import ValidationError
 
 from ota_image_builder.cmds.aws_kms_sign import (
-    KMS_MESSAGE_TYPE_DIGEST,
     AWSKMSSignResponse,
     SignWithAWSKMSInput,
-    _load_input_json,
-    _parse_sign_input,
+    _load_input,
     compose_signed_jwt_from_kms_response,
     finalize_for_aws_kms_sign,
     finalize_for_aws_kms_sign_cmd,
@@ -62,6 +61,8 @@ from ota_image_builder.cmds.aws_kms_sign import (
     sign_with_aws_kms_cmd,
     sign_with_aws_kms_cmd_args,
 )
+
+KMS_MESSAGE_TYPE_DIGEST = "DIGEST"
 
 # ------ test helpers ------ #
 
@@ -208,7 +209,7 @@ class TestFinalizeForAWSKMSSign:
         assert base64.b64decode(result.aws_kms_sign_request.message) == expected_digest
 
     def test_wire_serialization_uses_aliases(self, tmp_path: Path):
-        """The serialized wire form uses the PascalCase aliases and SchemaVer == 1."""
+        """The default serialization uses the PascalCase aliases (serialize_by_alias)."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
         descriptor = ImageIndex.Descriptor(digest=Sha256Digest("c" * 64), size=7)
@@ -221,16 +222,20 @@ class TestFinalizeForAWSKMSSign:
                 image_root, sign_cert_chain=_make_ee_chain(), force_sign=False
             )
 
-        wire = json.loads(result.model_dump_json(by_alias=True))
-        assert set(wire) == {"AWSKMSSignRequest", "JWTPayloadUnsigned", "SchemaVer"}
+        wire = json.loads(result.model_dump_json())
+        assert set(wire) == {
+            "AWSKMSSignRequestTemplate",
+            "JWTPayloadUnsigned",
+            "SchemaVer",
+        }
         assert wire["SchemaVer"] == 1
-        assert set(wire["AWSKMSSignRequest"]) == {
+        assert set(wire["AWSKMSSignRequestTemplate"]) == {
             "Message",
             "MessageType",
             "SigningAlgorithm",
         }
         # StrEnum serializes to its plain string value.
-        assert wire["AWSKMSSignRequest"]["SigningAlgorithm"] == "ECDSA_SHA_256"
+        assert wire["AWSKMSSignRequestTemplate"]["SigningAlgorithm"] == "ECDSA_SHA_256"
 
     def test_unsupported_aws_algorithm_exits(self, tmp_path: Path):
         """The defensive guard exits if the lib returns an unmappable algorithm."""
@@ -374,7 +379,11 @@ class TestFinalizeForAWSKMSSignCmd:
 
         # stdout must be the well-formed JSON output object only.
         parsed = json.loads(capsys.readouterr().out)
-        assert set(parsed) == {"AWSKMSSignRequest", "JWTPayloadUnsigned", "SchemaVer"}
+        assert set(parsed) == {
+            "AWSKMSSignRequestTemplate",
+            "JWTPayloadUnsigned",
+            "SchemaVer",
+        }
         assert parsed["SchemaVer"] == 1
 
     def test_runtime_error_during_finalize_exits(self, tmp_path: Path):
@@ -410,55 +419,43 @@ class TestFinalizeForAWSKMSSignCmd:
                 finalize_for_aws_kms_sign_cmd(args)
 
 
-# ------ _load_input_json ------ #
+# ------ _load_input ------ #
 
 
-class TestLoadInputJson:
-    """Tests for the _load_input_json helper."""
+class TestLoadInput:
+    """Tests for the _load_input helper."""
 
-    def test_inline_json(self):
-        assert _load_input_json('{"a": 1}') == {"a": 1}
+    def test_inline_json_returned_verbatim(self):
+        assert _load_input('{"a": 1}') == '{"a": 1}'
 
     def test_inline_json_with_leading_whitespace(self):
-        assert _load_input_json('   {"a": 1}') == {"a": 1}
+        assert _load_input('   {"a": 1}') == '   {"a": 1}'
 
     def test_from_file(self, tmp_path: Path):
         f = tmp_path / "in.json"
         f.write_text('{"x": "y"}')
-        assert _load_input_json(str(f)) == {"x": "y"}
+        assert _load_input(str(f)) == '{"x": "y"}'
 
     def test_from_stdin(self, monkeypatch):
         import io
 
         monkeypatch.setattr("sys.stdin", io.StringIO('{"s": true}'))
-        assert _load_input_json("-") == {"s": True}
+        assert _load_input("-") == '{"s": true}'
 
     def test_empty_exits(self):
         with pytest.raises(SystemExit):
-            _load_input_json("")
+            _load_input("")
 
     def test_nonexistent_file_exits(self, tmp_path: Path):
         with pytest.raises(SystemExit):
-            _load_input_json(str(tmp_path / "missing.json"))
-
-    def test_invalid_json_exits(self):
-        with pytest.raises(SystemExit):
-            _load_input_json("{not json}")
-
-    def test_non_object_json_from_file_exits(self, tmp_path: Path):
-        # A JSON array does not start with "{", so it's read as a file path; put it in
-        # a file so parsing succeeds and the "must be a JSON object" check is reached.
-        f = tmp_path / "arr.json"
-        f.write_text("[1, 2, 3]")
-        with pytest.raises(SystemExit):
-            _load_input_json(str(f))
+            _load_input(str(tmp_path / "missing.json"))
 
     def test_unreadable_file_exits(self, tmp_path: Path):
         # Reading a directory raises (IsADirectoryError) -> generic read-failure path.
         a_dir = tmp_path / "a_dir"
         a_dir.mkdir()
         with pytest.raises(SystemExit):
-            _load_input_json(str(a_dir))
+            _load_input(str(a_dir))
 
     def test_stdin_read_exception_exits(self, monkeypatch):
         class _BadStdin:
@@ -467,33 +464,42 @@ class TestLoadInputJson:
 
         monkeypatch.setattr("sys.stdin", _BadStdin())
         with pytest.raises(SystemExit):
-            _load_input_json("-")
+            _load_input("-")
 
 
-# ------ _parse_sign_input (pydantic validation) ------ #
+# ------ SignWithAWSKMSInput schema validation ------ #
 
 
-class TestParseSignInput:
-    """Tests for schema validation of the sign-with-aws-kms input."""
+class TestSignWithAWSKMSInputValidation:
+    """Schema validation of the sign-with-aws-kms input (via model_validate_json).
 
-    def _valid_response(self) -> dict[str, str]:
-        return {
-            "Signature": base64.b64encode(b"sig").decode(),
-            "SigningAlgorithm": "ECDSA_SHA_256",
-        }
+    The command parses + validates the raw JSON text with
+    ``SignWithAWSKMSInput.model_validate_json``; these tests pin that behaviour
+    (alias + extra-field handling on success, ValidationError on bad input).
+    """
 
-    def test_parses_wire_aliases_and_ignores_extra(self):
-        model = _parse_sign_input(
+    @staticmethod
+    def _payload(**response_fields: str) -> str:
+        return json.dumps(
             {
                 "JWTPayloadUnsigned": "aaa.bbb",
-                "AWSKMSSignResponse": {
-                    "KeyId": "arn:aws:kms:dummy",  # extra -> ignored
-                    "Signature": "c2ln",
-                    "SigningAlgorithm": "ECDSA_SHA_256",
-                },
+                "AWSKMSSignResponse": response_fields,
             }
         )
-        assert isinstance(model, SignWithAWSKMSInput)
+
+    def test_parses_wire_aliases_and_ignores_extra(self):
+        model = SignWithAWSKMSInput.model_validate_json(
+            json.dumps(
+                {
+                    "JWTPayloadUnsigned": "aaa.bbb",
+                    "AWSKMSSignResponse": {
+                        "KeyId": "arn:aws:kms:dummy",  # extra -> ignored
+                        "Signature": "c2ln",
+                        "SigningAlgorithm": "ECDSA_SHA_256",
+                    },
+                }
+            )
+        )
         assert model.jwt_payload_unsigned == "aaa.bbb"
         assert model.aws_kms_sign_response.signature == "c2ln"
         assert (
@@ -501,44 +507,51 @@ class TestParseSignInput:
             is AWSKMSSignAlgorithm.ECDSA_SHA_256
         )
 
-    def test_missing_jwt_payload_exits(self):
-        with pytest.raises(SystemExit):
-            _parse_sign_input({"AWSKMSSignResponse": self._valid_response()})
-
-    def test_missing_kms_response_exits(self):
-        with pytest.raises(SystemExit):
-            _parse_sign_input({"JWTPayloadUnsigned": "aaa.bbb"})
-
-    def test_missing_signature_field_exits(self):
-        with pytest.raises(SystemExit):
-            _parse_sign_input(
-                {
-                    "JWTPayloadUnsigned": "aaa.bbb",
-                    "AWSKMSSignResponse": {"SigningAlgorithm": "ECDSA_SHA_256"},
-                }
+    def test_missing_jwt_payload_raises(self):
+        with pytest.raises(ValidationError):
+            SignWithAWSKMSInput.model_validate_json(
+                json.dumps(
+                    {
+                        "AWSKMSSignResponse": {
+                            "Signature": "c2ln",
+                            "SigningAlgorithm": "ECDSA_SHA_256",
+                        }
+                    }
+                )
             )
 
-    def test_missing_signing_algorithm_exits(self):
-        with pytest.raises(SystemExit):
-            _parse_sign_input(
-                {
-                    "JWTPayloadUnsigned": "aaa.bbb",
-                    "AWSKMSSignResponse": {"Signature": "c2ln"},
-                }
+    def test_missing_kms_response_raises(self):
+        with pytest.raises(ValidationError):
+            SignWithAWSKMSInput.model_validate_json(
+                json.dumps({"JWTPayloadUnsigned": "aaa.bbb"})
             )
 
-    def test_unsupported_algorithm_exits(self):
-        """An unsupported SigningAlgorithm is rejected at schema validation time."""
-        with pytest.raises(SystemExit):
-            _parse_sign_input(
-                {
-                    "JWTPayloadUnsigned": "aaa.bbb",
-                    "AWSKMSSignResponse": {
-                        "Signature": "c2ln",
-                        "SigningAlgorithm": "RSASSA_PKCS1_V1_5_SHA_256",
-                    },
-                }
+    def test_missing_signature_raises(self):
+        with pytest.raises(ValidationError):
+            SignWithAWSKMSInput.model_validate_json(
+                self._payload(SigningAlgorithm="ECDSA_SHA_256")
             )
+
+    def test_missing_signing_algorithm_raises(self):
+        with pytest.raises(ValidationError):
+            SignWithAWSKMSInput.model_validate_json(self._payload(Signature="c2ln"))
+
+    def test_unsupported_algorithm_raises(self):
+        """An unsupported SigningAlgorithm is rejected by the enum field."""
+        with pytest.raises(ValidationError):
+            SignWithAWSKMSInput.model_validate_json(
+                self._payload(
+                    Signature="c2ln", SigningAlgorithm="RSASSA_PKCS1_V1_5_SHA_256"
+                )
+            )
+
+    def test_malformed_json_raises(self):
+        with pytest.raises(ValidationError):
+            SignWithAWSKMSInput.model_validate_json("{not json}")
+
+    def test_non_object_json_raises(self):
+        with pytest.raises(ValidationError):
+            SignWithAWSKMSInput.model_validate_json("[1, 2, 3]")
 
 
 # ------ compose_signed_jwt_from_kms_response ------ #
@@ -594,6 +607,13 @@ class TestSignWithAwsKmsCmd:
         ):
             with pytest.raises(SystemExit):
                 sign_with_aws_kms_cmd(args)
+
+    def test_invalid_input_exits(self):
+        """Well-formed JSON that fails schema validation exits cleanly (no traceback)."""
+        # Missing AWSKMSSignResponse -> ValidationError -> exit_with_err_msg.
+        args = Namespace(input='{"JWTPayloadUnsigned": "a.b"}', image_root=None)
+        with pytest.raises(SystemExit):
+            sign_with_aws_kms_cmd(args)
 
     def test_prints_jwt_without_image_root(self, tmp_path: Path, capsys):
         """Without --image-root, the JWT is only printed (no index.jwt written)."""
@@ -721,11 +741,13 @@ class TestRoundTrip:
         signing_input = raw.jwt_payload_unsigned
         kms_resp = _simulate_kms_sign_response(signing_input, ee_key_pem)
 
-        input_model = _parse_sign_input(
-            {
-                "JWTPayloadUnsigned": signing_input,
-                "AWSKMSSignResponse": kms_resp,
-            }
+        input_model = SignWithAWSKMSInput.model_validate_json(
+            json.dumps(
+                {
+                    "JWTPayloadUnsigned": signing_input,
+                    "AWSKMSSignResponse": kms_resp,
+                }
+            )
         )
         signed_jwt = compose_signed_jwt_from_kms_response(input_model)
 

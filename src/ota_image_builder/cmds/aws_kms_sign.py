@@ -57,9 +57,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# We always compose the request with MessageType=DIGEST
-KMS_MESSAGE_TYPE_DIGEST = "DIGEST"
-
 # Map an AWS KMS ECDSA signing algorithm to the hashlib constructor used to pre-hash
 # the signing input for MessageType=DIGEST.
 _AWS_ALG_HASHLIB_MAPPING = {
@@ -88,7 +85,7 @@ class AWSKMSSignRequestTemplate(BaseModel):
 
     message: str = Field(alias="Message")
     """Base64-encoded SHA-* digest of the JWT signing input (for MessageType=DIGEST)."""
-    message_type: str = Field(default=KMS_MESSAGE_TYPE_DIGEST, alias="MessageType")
+    message_type: Literal["DIGEST"] = Field(default="DIGEST", alias="MessageType")
     signing_algorithm: AWSKMSSignAlgorithm = Field(alias="SigningAlgorithm")
 
 
@@ -97,8 +94,11 @@ class FinalizeForAWSKMSSignOutput(BaseModel):
 
     model_config = MODEL_WITH_ALIAS
 
-    aws_kms_sign_request: AWSKMSSignRequestTemplate = Field(alias="AWSKMSSignRequest")
+    aws_kms_sign_request: AWSKMSSignRequestTemplate = Field(
+        alias="AWSKMSSignRequestTemplate"
+    )
     jwt_payload_unsigned: str = Field(alias="JWTPayloadUnsigned")
+    """The Base64_URL-encoded JWT(`header.payload`)."""
     schema_ver: Literal[1] = Field(default=1, alias="SchemaVer")
 
 
@@ -109,7 +109,7 @@ class AWSKMSSignResponse(BaseModel):
     ``API_Sign_ResponseSyntax``.
     """
 
-    # NOTE: extra="ignore" so a verbatim KMS response (with KeyId, etc.) validates.
+    # NOTE: extra="ignore" to ignore unrelated fields in the KMS sign resp.
     model_config = ConfigDict(MODEL_WITH_ALIAS, extra="ignore")
 
     signature: str = Field(alias="Signature")
@@ -123,6 +123,7 @@ class SignWithAWSKMSInput(BaseModel):
     model_config = MODEL_WITH_ALIAS
 
     jwt_payload_unsigned: str = Field(alias="JWTPayloadUnsigned")
+    """The Base64_URL-encoded JWT(`header.payload`)."""
     aws_kms_sign_response: AWSKMSSignResponse = Field(alias="AWSKMSSignResponse")
 
 
@@ -145,8 +146,8 @@ def finalize_for_aws_kms_sign(
         the KMS ``Sign`` response of the *same* ``finalize-for-aws-kms-sign`` run.
 
     Returns:
-        The finalize-for-aws-kms-sign output with the ``AWSKMSSignRequest`` template, the
-        ``JWTPayloadUnsigned`` signing input and ``SchemaVer``.
+        The finalize-for-aws-kms-sign output with the ``AWSKMSSignRequestTemplate``,
+        the ``JWTPayloadUnsigned`` signing input and ``SchemaVer``.
     """
     _index_helper = ImageIndexHelper(image_root)
     if not _index_helper.image_index.image_finalized:
@@ -154,9 +155,9 @@ def finalize_for_aws_kms_sign(
             "ERR: image is not yet finalized, "
             "run the `finalize` command before `finalize-for-aws-kms-sign`, abort!"
         )
+
     _index_helper.image_index.finalize_signing_image(force_sign=force_sign)
     _, _index_descriptor = _index_helper.sync_index()
-
     aws_alg, unsigned_jwt = compose_unsigned_index_jwt_for_aws_kms_sign(
         _index_descriptor, sign_cert_chain=sign_cert_chain
     )
@@ -166,15 +167,13 @@ def finalize_for_aws_kms_sign(
     except KeyError:
         exit_with_err_msg(f"unsupported AWS KMS signing algorithm: {aws_alg}")
 
-    _digest = _hashlib_impl(unsigned_jwt.encode("ascii")).digest()
-    _message_b64 = base64.b64encode(_digest).decode("ascii")
+    _message_digest_b64 = base64.b64encode(
+        _hashlib_impl(unsigned_jwt.encode("ascii")).digest()
+    ).decode("ascii")
 
-    # NOTE: construct via the wire aliases (validate_by_alias=True). This also keeps
-    #       static type checkers happy, since the synthesized __init__ for an aliased
-    #       model is keyed on the aliases.
     return FinalizeForAWSKMSSignOutput(
-        AWSKMSSignRequest=AWSKMSSignRequestTemplate(
-            Message=_message_b64,
+        AWSKMSSignRequestTemplate=AWSKMSSignRequestTemplate(
+            Message=_message_digest_b64,
             SigningAlgorithm=aws_alg,
         ),
         JWTPayloadUnsigned=unsigned_jwt,
@@ -184,17 +183,19 @@ def finalize_for_aws_kms_sign(
 def finalize_for_aws_kms_sign_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
+    _help_txt = (
+        "Finalize an OTA image for AWS KMS signing: emit the "
+        "unsigned JWT and a corresponding AWS KMS Sign request template "
+        "for caller to request signing."
+    )
     _parser = sub_arg_parser.add_parser(
         name="finalize-for-aws-kms-sign",
-        help=(
-            _help_txt := "Finalize an OTA image for AWS KMS signing: emit the "
-            "unsigned JWT and an AWS KMS Sign request template"
-        ),
+        help=_help_txt,
         description=(
             f"{_help_txt}. The OTA image MUST be finalized first (run `finalize`). "
             "This finalizes the image signing state and rewrites index.json, then "
-            "prints a JSON object with `AWSKMSSignRequest`, `JWTPayloadUnsigned` and "
-            "`SchemaVer` to stdout."
+            "prints a JSON object with `AWSKMSSignRequestTemplate`, "
+            "`JWTPayloadUnsigned` and `SchemaVer` to stdout."
         ),
         parents=parent_parser,
     )
@@ -265,7 +266,7 @@ def finalize_for_aws_kms_sign_cmd(args: Namespace) -> None:
 
 
 def _load_input(_in: str | None) -> str:
-    """Resolve the ``input`` arg into a parsed JSON object.
+    """Resolve the ``input`` arg, return the retrieved raw JSON string.
 
     Accepts inline JSON (a string starting with ``{``), a file path, or ``-`` to read
     from stdin.
@@ -319,13 +320,13 @@ def compose_signed_jwt_from_kms_response(input_obj: SignWithAWSKMSInput) -> str:
 def sign_with_aws_kms_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
+    _help_txt = (
+        "Assemble a signed index.jwt from a finalize-for-aws-kms-sign output "
+        "and an AWS KMS Sign response"
+    )
     _parser = sub_arg_parser.add_parser(
         name="sign-with-aws-kms",
-        help=(
-            _help_txt
-            := "Assemble a signed index.jwt from a finalize-for-aws-kms-sign output "
-            "and an AWS KMS Sign response"
-        ),
+        help=_help_txt,
         description=(
             f"{_help_txt}. Prints the complete signed JWT to stdout, and optionally "
             "writes it into <image-root>/index.jwt."
@@ -357,11 +358,12 @@ def sign_with_aws_kms_cmd(args: Namespace) -> None:
         exit_with_err_msg(f"invalid input: {e}")
 
     signed_jwt = compose_signed_jwt_from_kms_response(input_obj)
-
     if args.image_root is not None:
         image_root = Path(args.image_root)
         if not check_if_valid_ota_image(image_root):
             exit_with_err_msg(f"{image_root} doesn't hold a valid OTA image.")
+        logger.info(f"write the signed index.jwt to the {args.image_root} ...")
+
         index_jwt_f = image_root / INDEX_JWT_FNAME
         index_jwt_f.write_text(signed_jwt)
         logger.info(f"Signed index.jwt written to {index_jwt_f}")
