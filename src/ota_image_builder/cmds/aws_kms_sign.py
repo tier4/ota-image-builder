@@ -15,10 +15,10 @@
 
 Two CLI subcommands are provided for the support:
 
-1. ``finalize-for-aws-kms-sign``: finalizes the image signing state, rewrites ``index.json`` and emits
+1. ``sign-with-aws-kms-prepare``: finalizes the image signing state, rewrites ``index.json`` and emits
    the unsigned JWT signing input (``header.payload``) together with a ready-to-fill
    AWS KMS ``Sign`` request template.
-2. ``sign-with-aws-kms``: takes that unsigned signing input plus the AWS KMS ``Sign``
+2. ``sign-with-aws-kms-finish``: takes that unsigned signing input plus the AWS KMS ``Sign``
    response and assembles the complete, signed ``index.jwt``.
 
 Reference: https://docs.aws.amazon.com/kms/latest/APIReference/API_Sign.html.
@@ -28,26 +28,31 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import logging
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from ota_image_libs._crypto.aws_kms import (
     AWSKMSSignAlgorithm,
     compose_jwt_from_aws_kms_sign_response,
+    get_aws_sign_alg,
 )
 from ota_image_libs.v1.consts import INDEX_JWT_FNAME
-from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 from ota_image_libs.v1.index_jwt.utils import (
     compose_unsigned_index_jwt_for_aws_kms_sign,
+    decode_index_jwt_with_verification,
+    get_index_jwt_sign_cert_chain,
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
-from ota_image_builder.cmds.sign import load_cert_chains
+from ota_image_builder.cmds.sign import (
+    load_cert_chain_from_args,
+    seal_image_before_sign,
+)
 
-from ._utils import MODEL_WITH_ALIAS
+from ._utils import MODEL_WITH_ALIAS, resolve_cli_input_arg
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser, Namespace, _SubParsersAction
@@ -89,8 +94,8 @@ class AWSKMSSignRequestTemplate(BaseModel):
     signing_algorithm: AWSKMSSignAlgorithm = Field(alias="SigningAlgorithm")
 
 
-class FinalizeForAWSKMSSignOutput(BaseModel):
-    """The ``finalize-for-aws-kms-sign`` output object printed to stdout."""
+class SignWithAWSKMSPrepareOutput(BaseModel):
+    """The ``sign-with-aws-kms-prepare`` output object printed to stdout."""
 
     model_config = MODEL_WITH_ALIAS
 
@@ -118,7 +123,7 @@ class AWSKMSSignResponse(BaseModel):
 
 
 class SignWithAWSKMSInput(BaseModel):
-    """The ``sign-with-aws-kms`` input object."""
+    """The ``sign-with-aws-kms-finish`` input object."""
 
     model_config = MODEL_WITH_ALIAS
 
@@ -128,36 +133,28 @@ class SignWithAWSKMSInput(BaseModel):
 
 
 #
-# ------ finalize-for-aws-kms-sign ------ #
+# ------ sign-with-aws-kms-prepare ------ #
 #
 
 
-def finalize_for_aws_kms_sign(
+def sign_with_aws_kms_prepare(
     image_root: Path,
     *,
     sign_cert_chain: X5cX509CertChain,
     force_sign: bool,
-) -> FinalizeForAWSKMSSignOutput:
+) -> SignWithAWSKMSPrepareOutput:
     """Finalize the signing state and compose the unsigned JWT + KMS Sign request.
 
     NOTE: this mutates the OTA image. It sets the ``signed_at`` annotation and rewrites
         ``index.json`` so the descriptor embedded into the returned JWT matches the
         on-disk ``index.json``. The returned ``JWTPayloadUnsigned`` must be paired with
-        the KMS ``Sign`` response of the *same* ``finalize-for-aws-kms-sign`` run.
+        the KMS ``Sign`` response of the *same* ``sign-with-aws-kms-prepare`` run.
 
     Returns:
-        The finalize-for-aws-kms-sign output with the ``AWSKMSSignRequestTemplate``,
+        The sign-with-aws-kms-prepare output with the ``AWSKMSSignRequestTemplate``,
         the ``JWTPayloadUnsigned`` signing input and ``SchemaVer``.
     """
-    _index_helper = ImageIndexHelper(image_root)
-    if not _index_helper.image_index.image_finalized:
-        exit_with_err_msg(
-            "ERR: image is not yet finalized, "
-            "run the `finalize` command before `finalize-for-aws-kms-sign`, abort!"
-        )
-
-    _index_helper.image_index.finalize_signing_image(force_sign=force_sign)
-    _, _index_descriptor = _index_helper.sync_index()
+    _index_descriptor = seal_image_before_sign(image_root, force_sign=force_sign)
     aws_alg, unsigned_jwt = compose_unsigned_index_jwt_for_aws_kms_sign(
         _index_descriptor, sign_cert_chain=sign_cert_chain
     )
@@ -171,7 +168,7 @@ def finalize_for_aws_kms_sign(
         _hashlib_impl(unsigned_jwt.encode("ascii")).digest()
     ).decode("ascii")
 
-    return FinalizeForAWSKMSSignOutput(
+    return SignWithAWSKMSPrepareOutput(
         AWSKMSSignRequestTemplate=AWSKMSSignRequestTemplate(
             Message=_message_digest_b64,
             SigningAlgorithm=aws_alg,
@@ -180,7 +177,7 @@ def finalize_for_aws_kms_sign(
     )
 
 
-def finalize_for_aws_kms_sign_cmd_args(
+def sign_with_aws_kms_prepare_cmd_args(
     sub_arg_parser: _SubParsersAction[ArgumentParser], *parent_parser: ArgumentParser
 ) -> None:
     _help_txt = (
@@ -189,7 +186,7 @@ def finalize_for_aws_kms_sign_cmd_args(
         "AWS KMS Sign request template for caller to request signing."
     )
     _parser = sub_arg_parser.add_parser(
-        name="finalize-for-aws-kms-sign",
+        name="sign-with-aws-kms-prepare",
         help=_help_txt,
         description=(
             f"{_help_txt} The OTA image MUST be finalized first (run `finalize`). "
@@ -219,37 +216,22 @@ def finalize_for_aws_kms_sign_cmd_args(
         "image_root",
         help="The folder that holds the finalized OTA image to be signed.",
     )
-    _parser.set_defaults(handler=finalize_for_aws_kms_sign_cmd)
+    _parser.set_defaults(handler=sign_with_aws_kms_prepare_cmd)
 
 
-def finalize_for_aws_kms_sign_cmd(args: Namespace) -> None:
-    logger.debug(f"calling {finalize_for_aws_kms_sign_cmd.__name__} with {args}")
+def sign_with_aws_kms_prepare_cmd(args: Namespace) -> None:
+    logger.debug(f"calling {sign_with_aws_kms_prepare_cmd.__name__} with {args}")
     image_root = Path(args.image_root)
     if not check_if_valid_ota_image(image_root):
         exit_with_err_msg(f"{image_root} doesn't hold a valid OTA image.")
 
-    sign_cert_f = Path(args.sign_cert)
-    ca_certs_fs = [Path(_ca_cert) for _ca_cert in (args.ca_cert or [])]
-
-    if not sign_cert_f.is_file():
-        exit_with_err_msg(f"{sign_cert_f=} not found.")
-    for _ca_cert in ca_certs_fs:
-        if not _ca_cert.is_file():
-            exit_with_err_msg(f"CA cert {_ca_cert} is specified, but not found.")
-
-    try:
-        loaded_cert_chain = load_cert_chains(sign_cert_f, ca_certs_fs)
-    except Exception as e:
-        logger.debug(f"failed to load sign cert chain: {e}", exc_info=e)
-        exit_with_err_msg(
-            f"failed to load sign cert chain {sign_cert_f} and {ca_certs_fs}"
-        )
+    loaded_cert_chain = load_cert_chain_from_args(args)
 
     logger.info(
         f"Generating raw JWT and AWS KMS Sign request template for {image_root} ..."
     )
     try:
-        result = finalize_for_aws_kms_sign(
+        result = sign_with_aws_kms_prepare(
             image_root,
             sign_cert_chain=loaded_cert_chain,
             force_sign=args.force_sign,
