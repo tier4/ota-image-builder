@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -131,6 +130,7 @@ class SignWithAWSKMSInput(BaseModel):
     jwt_payload_unsigned: str = Field(alias="JWTPayloadUnsigned")
     """The Base64_URL-encoded JWT(`header.payload`)."""
     aws_kms_sign_response: AWSKMSSignResponse = Field(alias="AWSKMSSignResponse")
+    schema_ver: Literal[1] = Field(default=1, alias="SchemaVer")
 
 
 #
