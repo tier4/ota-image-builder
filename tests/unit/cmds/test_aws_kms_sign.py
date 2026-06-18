@@ -276,7 +276,9 @@ class TestSignWithAWSKMSPrepare:
             )
 
 
-def _prepare_args(image_root: Path, sign_cert: Path, ca_cert: list[str] | None) -> Namespace:
+def _prepare_args(
+    image_root: Path, sign_cert: Path, ca_cert: list[str] | None
+) -> Namespace:
     return Namespace(
         image_root=str(image_root),
         sign_cert=str(sign_cert),
