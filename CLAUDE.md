@@ -93,6 +93,8 @@ The builder provides the following subcommands (registered in `main.py`):
 | `add-otaclient-package-compat` | `add_otaclient_package_compat.py` | Legacy OTAClient compatibility |
 | `finalize` | `finalize.py` | Optimize blobs (bundle, compress, slice filters) and finalize image |
 | `sign` | `sign.py` | Sign finalized image with ES256 JWT |
+| `sign-with-aws-kms-prepare` | `aws_kms_sign.py` | Finalize signing state and emit the unsigned JWT + an AWS KMS `Sign` request template (JSON) for KMS-based signing |
+| `sign-with-aws-kms-finish` | `aws_kms_sign.py` | Assemble the signed `index.jwt` from the `sign-with-aws-kms-prepare` output + an AWS KMS `Sign` response |
 | `pack-artifact` | `pack_artifact.py` | Package into reproducible ZIP artifact |
 
 All commands accept `-d`/`--debug` for debug logging.

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from argparse import Namespace
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -30,9 +29,9 @@ from ota_image_builder.cmds.finalize import (
 class TestCollectProtectedResourcesDigest:
     """Tests for _collect_protected_resources_digest function."""
 
-    def test_returns_set_of_bytes(self):
+    def test_returns_set_of_bytes(self, mocker):
         """Test that function returns a set of bytes when no manifests."""
-        mock_helper = MagicMock()
+        mock_helper = mocker.MagicMock()
         mock_helper.image_index.manifests = []
 
         result = _collect_protected_resources_digest(mock_helper)
