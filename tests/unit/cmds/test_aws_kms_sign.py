@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import argparse
 import base64
 import datetime
 import hashlib
@@ -54,10 +53,8 @@ from ota_image_builder.cmds.aws_kms_sign import (
     SignWithAWSKMSInput,
     compose_signed_jwt_from_kms_response,
     sign_with_aws_kms_finish_cmd,
-    sign_with_aws_kms_finish_cmd_args,
     sign_with_aws_kms_prepare,
     sign_with_aws_kms_prepare_cmd,
-    sign_with_aws_kms_prepare_cmd_args,
 )
 
 KMS_MESSAGE_TYPE_DIGEST = "DIGEST"
@@ -279,6 +276,51 @@ class TestSignWithAWSKMSPrepare:
             )
 
 
+def _prepare_args(image_root: Path, sign_cert: Path, ca_cert: list[str] | None) -> Namespace:
+    return Namespace(
+        image_root=str(image_root),
+        sign_cert=str(sign_cert),
+        ca_cert=ca_cert,
+        force_sign=False,
+    )
+
+
+def _args_nonexistent_sign_cert(tmp_path: Path) -> Namespace:
+    image_root = tmp_path / "ota_image"
+    image_root.mkdir()
+    return _prepare_args(image_root, tmp_path / "nope.pem", None)
+
+
+def _args_nonexistent_ca_cert(tmp_path: Path) -> Namespace:
+    _, ee_pem, _ = _generate_test_ca_and_ee_chain()
+    cert_f = tmp_path / "ee.pem"
+    cert_f.write_bytes(ee_pem)
+    image_root = tmp_path / "ota_image"
+    image_root.mkdir()
+    return _prepare_args(image_root, cert_f, [str(tmp_path / "missing_ca.pem")])
+
+
+def _args_self_signed_ca(tmp_path: Path) -> Namespace:
+    # The CA file exists (loop iterates past the is_file check), but a self-signed
+    # root is rejected by load_cert_chains -> SystemExit.
+    ca_pem, ee_pem, _ = _generate_test_ca_and_ee_chain()
+    cert_f = tmp_path / "ee.pem"
+    cert_f.write_bytes(ee_pem)
+    ca_f = tmp_path / "ca.pem"
+    ca_f.write_bytes(ca_pem)
+    image_root = tmp_path / "ota_image"
+    image_root.mkdir()
+    return _prepare_args(image_root, cert_f, [str(ca_f)])
+
+
+def _args_invalid_cert(tmp_path: Path) -> Namespace:
+    cert_f = tmp_path / "bad.pem"
+    cert_f.write_text("not a valid cert")
+    image_root = tmp_path / "ota_image"
+    image_root.mkdir()
+    return _prepare_args(image_root, cert_f, None)
+
+
 class TestSignWithAWSKMSPrepareCmd:
     """Tests for the sign_with_aws_kms_prepare_cmd handler (arg validation)."""
 
@@ -294,76 +336,22 @@ class TestSignWithAWSKMSPrepareCmd:
         with pytest.raises(SystemExit):
             sign_with_aws_kms_prepare_cmd(args)
 
-    def test_nonexistent_sign_cert_exits(self, tmp_path: Path, mocker):
-        image_root = tmp_path / "ota_image"
-        image_root.mkdir()
-        args = Namespace(
-            image_root=str(image_root),
-            sign_cert=str(tmp_path / "nope.pem"),
-            ca_cert=None,
-            force_sign=False,
-        )
-        mocker.patch(
-            "ota_image_builder.cmds.aws_kms_sign.check_if_valid_ota_image",
-            return_value=True,
-        )
-        with pytest.raises(SystemExit):
-            sign_with_aws_kms_prepare_cmd(args)
+    @pytest.mark.parametrize(
+        "make_args",
+        [
+            pytest.param(_args_nonexistent_sign_cert, id="nonexistent_sign_cert"),
+            pytest.param(_args_nonexistent_ca_cert, id="nonexistent_ca_cert"),
+            pytest.param(_args_self_signed_ca, id="self_signed_ca_rejected"),
+            pytest.param(_args_invalid_cert, id="cert_chain_load_failure"),
+        ],
+    )
+    def test_arg_validation_exits(self, tmp_path: Path, mocker, make_args):
+        """An invalid sign-cert/CA configuration aborts with SystemExit.
 
-    def test_nonexistent_ca_cert_exits(self, tmp_path: Path, mocker):
-        _, ee_pem, _ = _generate_test_ca_and_ee_chain()
-        cert_f = tmp_path / "ee.pem"
-        cert_f.write_bytes(ee_pem)
-        image_root = tmp_path / "ota_image"
-        image_root.mkdir()
-        args = Namespace(
-            image_root=str(image_root),
-            sign_cert=str(cert_f),
-            ca_cert=[str(tmp_path / "missing_ca.pem")],
-            force_sign=False,
-        )
-        mocker.patch(
-            "ota_image_builder.cmds.aws_kms_sign.check_if_valid_ota_image",
-            return_value=True,
-        )
-        with pytest.raises(SystemExit):
-            sign_with_aws_kms_prepare_cmd(args)
-
-    def test_existing_ca_cert_is_iterated(self, tmp_path: Path, mocker):
-        """An existing --ca-cert passes the file check (loop iterates the truthy path)."""
-        ca_pem, ee_pem, _ = _generate_test_ca_and_ee_chain()
-        cert_f = tmp_path / "ee.pem"
-        cert_f.write_bytes(ee_pem)
-        ca_f = tmp_path / "ca.pem"
-        ca_f.write_bytes(ca_pem)
-        image_root = tmp_path / "ota_image"
-        image_root.mkdir()
-        args = Namespace(
-            image_root=str(image_root),
-            sign_cert=str(cert_f),
-            ca_cert=[str(ca_f)],
-            force_sign=False,
-        )
-        mocker.patch(
-            "ota_image_builder.cmds.aws_kms_sign.check_if_valid_ota_image",
-            return_value=True,
-        )
-        # The CA file exists (loop iterates past the is_file check), but a
-        # self-signed root is rejected by load_cert_chains -> SystemExit.
-        with pytest.raises(SystemExit):
-            sign_with_aws_kms_prepare_cmd(args)
-
-    def test_cert_chain_load_failure_exits(self, tmp_path: Path, mocker):
-        cert_f = tmp_path / "bad.pem"
-        cert_f.write_text("not a valid cert")
-        image_root = tmp_path / "ota_image"
-        image_root.mkdir()
-        args = Namespace(
-            image_root=str(image_root),
-            sign_cert=str(cert_f),
-            ca_cert=None,
-            force_sign=False,
-        )
+        The OTA-image validity check is mocked True so each case exercises the cert
+        chain loading path rather than the image check.
+        """
+        args = make_args(tmp_path)
         mocker.patch(
             "ota_image_builder.cmds.aws_kms_sign.check_if_valid_ota_image",
             return_value=True,
@@ -445,15 +433,6 @@ class TestSignWithAWSKMSInputValidation:
     (alias + extra-field handling on success, ValidationError on bad input).
     """
 
-    @staticmethod
-    def _payload(**response_fields: str) -> str:
-        return json.dumps(
-            {
-                "JWTPayloadUnsigned": "aaa.bbb",
-                "AWSKMSSignResponse": response_fields,
-            }
-        )
-
     def test_parses_wire_aliases_and_ignores_extra(self):
         model = SignWithAWSKMSInput.model_validate_json(
             json.dumps(
@@ -474,9 +453,10 @@ class TestSignWithAWSKMSInputValidation:
             is AWSKMSSignAlgorithm.ECDSA_SHA_256
         )
 
-    def test_missing_jwt_payload_raises(self):
-        with pytest.raises(ValidationError):
-            SignWithAWSKMSInput.model_validate_json(
+    @pytest.mark.parametrize(
+        "raw_json",
+        [
+            pytest.param(
                 json.dumps(
                     {
                         "AWSKMSSignResponse": {
@@ -484,143 +464,159 @@ class TestSignWithAWSKMSInputValidation:
                             "SigningAlgorithm": "ECDSA_SHA_256",
                         }
                     }
-                )
-            )
-
-    def test_missing_kms_response_raises(self):
+                ),
+                id="missing_jwt_payload",
+            ),
+            pytest.param(
+                json.dumps({"JWTPayloadUnsigned": "aaa.bbb"}),
+                id="missing_kms_response",
+            ),
+            pytest.param(
+                json.dumps(
+                    {
+                        "JWTPayloadUnsigned": "aaa.bbb",
+                        "AWSKMSSignResponse": {"SigningAlgorithm": "ECDSA_SHA_256"},
+                    }
+                ),
+                id="missing_signature",
+            ),
+            pytest.param(
+                json.dumps(
+                    {
+                        "JWTPayloadUnsigned": "aaa.bbb",
+                        "AWSKMSSignResponse": {"Signature": "c2ln"},
+                    }
+                ),
+                id="missing_signing_algorithm",
+            ),
+            pytest.param(
+                json.dumps(
+                    {
+                        "JWTPayloadUnsigned": "aaa.bbb",
+                        "AWSKMSSignResponse": {
+                            "Signature": "c2ln",
+                            # unsupported SigningAlgorithm is rejected by the enum field.
+                            "SigningAlgorithm": "RSASSA_PKCS1_V1_5_SHA_256",
+                        },
+                    }
+                ),
+                id="unsupported_algorithm",
+            ),
+            pytest.param("{not json}", id="malformed_json"),
+            pytest.param("[1, 2, 3]", id="non_object_json"),
+        ],
+    )
+    def test_invalid_input_raises(self, raw_json: str):
         with pytest.raises(ValidationError):
-            SignWithAWSKMSInput.model_validate_json(
-                json.dumps({"JWTPayloadUnsigned": "aaa.bbb"})
-            )
-
-    def test_missing_signature_raises(self):
-        with pytest.raises(ValidationError):
-            SignWithAWSKMSInput.model_validate_json(
-                self._payload(SigningAlgorithm="ECDSA_SHA_256")
-            )
-
-    def test_missing_signing_algorithm_raises(self):
-        with pytest.raises(ValidationError):
-            SignWithAWSKMSInput.model_validate_json(self._payload(Signature="c2ln"))
-
-    def test_unsupported_algorithm_raises(self):
-        """An unsupported SigningAlgorithm is rejected by the enum field."""
-        with pytest.raises(ValidationError):
-            SignWithAWSKMSInput.model_validate_json(
-                self._payload(
-                    Signature="c2ln", SigningAlgorithm="RSASSA_PKCS1_V1_5_SHA_256"
-                )
-            )
-
-    def test_malformed_json_raises(self):
-        with pytest.raises(ValidationError):
-            SignWithAWSKMSInput.model_validate_json("{not json}")
-
-    def test_non_object_json_raises(self):
-        with pytest.raises(ValidationError):
-            SignWithAWSKMSInput.model_validate_json("[1, 2, 3]")
+            SignWithAWSKMSInput.model_validate_json(raw_json)
 
 
 # ------ compose_signed_jwt_from_kms_response ------ #
 
 
+def _input_model(signing_input: str, kms_resp: dict[str, str]) -> SignWithAWSKMSInput:
+    return SignWithAWSKMSInput.model_validate_json(
+        json.dumps(
+            {"JWTPayloadUnsigned": signing_input, "AWSKMSSignResponse": kms_resp}
+        )
+    )
+
+
+def _setup_algorithm_mismatch(mocker) -> SignWithAWSKMSInput:
+    """The response SigningAlgorithm must match the JWT header's algorithm.
+
+    The JWT header is always ES256 (-> ECDSA_SHA_256). A response that advertises a
+    different ECDSA algorithm must be rejected up front, even when the DER signature
+    itself is a perfectly valid P-256 signature. Otherwise the DER->raw conversion
+    would silently size the signature for the wrong curve and emit a structurally
+    valid but cryptographically invalid index.jwt.
+    """
+    signing_input, ee_key_pem = _make_real_unsigned_jwt(mocker)
+    # Valid P-256 signature, but mislabeled as ECDSA_SHA_512.
+    kms_resp = _simulate_kms_sign_response(
+        signing_input, ee_key_pem, signing_algorithm="ECDSA_SHA_512"
+    )
+    return _input_model(signing_input, kms_resp)
+
+
+def _setup_wrong_key(mocker) -> SignWithAWSKMSInput:
+    """A structurally valid signature that does not verify against the signing cert
+    embedded in the JWT must be rejected, so a broken index.jwt is never returned.
+    """
+    signing_input, _ = _make_real_unsigned_jwt(mocker)
+    # Sign with a DIFFERENT key than the EE cert embedded in the signing input;
+    # the algorithm still matches, so this only trips the self-verification guard.
+    wrong_key = ec.generate_private_key(ec.SECP256R1())
+    wrong_key_pem = wrong_key.private_bytes(
+        Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
+    )
+    kms_resp = _simulate_kms_sign_response(signing_input, wrong_key_pem)
+    return _input_model(signing_input, kms_resp)
+
+
+def _setup_mispaired_payload(mocker) -> SignWithAWSKMSInput:
+    """A signature correctly produced for a DIFFERENT signing input (e.g. a stale
+    sign-with-aws-kms-prepare output) must fail self-verification rather than be
+    assembled into a mismatched index.jwt.
+    """
+    signing_input, ee_key_pem = _make_real_unsigned_jwt(
+        mocker, ImageIndex.Descriptor(digest=Sha256Digest("a" * 64), size=1)
+    )
+    other_input, _ = _make_real_unsigned_jwt(
+        mocker, ImageIndex.Descriptor(digest=Sha256Digest("b" * 64), size=2)
+    )
+    # Signature is over `other_input` but paired with `signing_input`.
+    kms_resp = _simulate_kms_sign_response(other_input, ee_key_pem)
+    return _input_model(signing_input, kms_resp)
+
+
 class TestComposeSignedJwtFromKmsResponse:
     """Tests for compose_signed_jwt_from_kms_response error handling."""
 
-    def test_bad_base64_signature_exits(self, mocker):
-        """A Signature that is not valid base64 is rejected (base64 validate=True)."""
+    @pytest.mark.parametrize(
+        "signature",
+        [
+            # A Signature that is not valid base64 is rejected (base64 validate=True).
+            pytest.param("!!!not-base64!!!", id="bad_base64"),
+            # A validly-base64 but non-DER signature fails inside the compose step.
+            pytest.param(
+                base64.b64encode(b"not-a-der-signature").decode(), id="garbage_der"
+            ),
+        ],
+    )
+    def test_undecodable_signature_exits(self, mocker, signature: str):
         # A real ES256 signing input so the algorithm guard passes and we reach the
-        # base64-decode step.
+        # signature decode/compose step.
         signing_input, _ = _make_real_unsigned_jwt(mocker)
         model = SignWithAWSKMSInput(
             JWTPayloadUnsigned=signing_input,
             AWSKMSSignResponse=AWSKMSSignResponse(
-                Signature="!!!not-base64!!!",
+                Signature=signature,
                 SigningAlgorithm=AWSKMSSignAlgorithm.ECDSA_SHA_256,
             ),
         )
         with pytest.raises(SystemExit):
             compose_signed_jwt_from_kms_response(model)
 
-    def test_garbage_der_signature_exits(self, mocker):
-        """A validly-base64 but non-DER signature fails inside the compose step."""
-        signing_input, _ = _make_real_unsigned_jwt(mocker)
-        model = SignWithAWSKMSInput(
-            JWTPayloadUnsigned=signing_input,
-            AWSKMSSignResponse=AWSKMSSignResponse(
-                Signature=base64.b64encode(b"not-a-der-signature").decode(),
-                SigningAlgorithm=AWSKMSSignAlgorithm.ECDSA_SHA_256,
+    @pytest.mark.parametrize(
+        ("setup", "expected_msg"),
+        [
+            pytest.param(
+                _setup_algorithm_mismatch, "doesn't match", id="algorithm_mismatch"
             ),
-        )
+            pytest.param(_setup_wrong_key, "self-verification", id="wrong_key"),
+            pytest.param(
+                _setup_mispaired_payload, "self-verification", id="mispaired_payload"
+            ),
+        ],
+    )
+    def test_invalid_kms_response_exits(self, capsys, mocker, setup, expected_msg: str):
+        """A KMS response that is inconsistent with the signing input must abort with the
+        guard-specific error message (not a later generic failure)."""
+        model = setup(mocker)
         with pytest.raises(SystemExit):
             compose_signed_jwt_from_kms_response(model)
-
-    def test_algorithm_mismatch_exits(self, capsys, mocker):
-        """The response SigningAlgorithm must match the JWT header's algorithm.
-
-        The JWT header is always ES256 (-> ECDSA_SHA_256). A response that advertises a
-        different ECDSA algorithm must be rejected up front, even when the DER signature
-        itself is a perfectly valid P-256 signature. Otherwise the DER->raw conversion
-        would silently size the signature for the wrong curve and emit a structurally
-        valid but cryptographically invalid index.jwt.
-        """
-        signing_input, ee_key_pem = _make_real_unsigned_jwt(mocker)
-        # Valid P-256 signature, but mislabeled as ECDSA_SHA_512.
-        kms_resp = _simulate_kms_sign_response(
-            signing_input, ee_key_pem, signing_algorithm="ECDSA_SHA_512"
-        )
-        model = SignWithAWSKMSInput.model_validate_json(
-            json.dumps(
-                {"JWTPayloadUnsigned": signing_input, "AWSKMSSignResponse": kms_resp}
-            )
-        )
-        with pytest.raises(SystemExit):
-            compose_signed_jwt_from_kms_response(model)
-        # Pinned to the algorithm-mismatch guard (not a later generic failure).
-        assert "doesn't match" in capsys.readouterr().out
-
-    def test_signature_from_wrong_key_fails_self_verification(self, capsys, mocker):
-        """A structurally valid signature that does not verify against the signing cert
-        embedded in the JWT must be rejected, so a broken index.jwt is never returned.
-        """
-        signing_input, _ = _make_real_unsigned_jwt(mocker)
-        # Sign with a DIFFERENT key than the EE cert embedded in the signing input;
-        # the algorithm still matches, so this only trips the self-verification guard.
-        wrong_key = ec.generate_private_key(ec.SECP256R1())
-        wrong_key_pem = wrong_key.private_bytes(
-            Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
-        )
-        kms_resp = _simulate_kms_sign_response(signing_input, wrong_key_pem)
-        model = SignWithAWSKMSInput.model_validate_json(
-            json.dumps(
-                {"JWTPayloadUnsigned": signing_input, "AWSKMSSignResponse": kms_resp}
-            )
-        )
-        with pytest.raises(SystemExit):
-            compose_signed_jwt_from_kms_response(model)
-        assert "self-verification" in capsys.readouterr().out
-
-    def test_mispaired_payload_fails_self_verification(self, capsys, mocker):
-        """A signature correctly produced for a DIFFERENT signing input (e.g. a stale
-        sign-with-aws-kms-prepare output) must fail self-verification rather than be
-        assembled into a mismatched index.jwt.
-        """
-        signing_input, ee_key_pem = _make_real_unsigned_jwt(
-            mocker, ImageIndex.Descriptor(digest=Sha256Digest("a" * 64), size=1)
-        )
-        other_input, _ = _make_real_unsigned_jwt(
-            mocker, ImageIndex.Descriptor(digest=Sha256Digest("b" * 64), size=2)
-        )
-        # Signature is over `other_input` but paired with `signing_input`.
-        kms_resp = _simulate_kms_sign_response(other_input, ee_key_pem)
-        model = SignWithAWSKMSInput.model_validate_json(
-            json.dumps(
-                {"JWTPayloadUnsigned": signing_input, "AWSKMSSignResponse": kms_resp}
-            )
-        )
-        with pytest.raises(SystemExit):
-            compose_signed_jwt_from_kms_response(model)
-        assert "self-verification" in capsys.readouterr().out
+        assert expected_msg in capsys.readouterr().out
 
 
 # ------ sign_with_aws_kms_finish_cmd ------ #
@@ -720,65 +716,6 @@ class TestSignWithAwsKmsCmd:
         extracted_chain = get_index_jwt_sign_cert_chain(signed_jwt)
         claims = decode_index_jwt_with_verification(signed_jwt, extracted_chain)
         assert claims.image_index.size == descriptor.size
-
-
-# ------ arg-parser registration ------ #
-
-
-class TestCmdArgsRegistration:
-    """Verify the subcommands register their args and handlers correctly."""
-
-    def test_sign_with_aws_kms_prepare_cmd_args(self):
-        parser = argparse.ArgumentParser()
-        sub = parser.add_subparsers()
-        sign_with_aws_kms_prepare_cmd_args(sub)
-
-        args = parser.parse_args(
-            [
-                "sign-with-aws-kms-prepare",
-                "--sign-cert",
-                "ee.pem",
-                "--ca-cert",
-                "ca1.pem",
-                "--ca-cert",
-                "ca2.pem",
-                "--force-sign",
-                "/img",
-            ]
-        )
-        assert args.handler is sign_with_aws_kms_prepare_cmd
-        assert args.sign_cert == "ee.pem"
-        assert args.ca_cert == ["ca1.pem", "ca2.pem"]
-        assert args.force_sign is True
-        assert args.image_root == "/img"
-
-    def test_sign_with_aws_kms_prepare_cmd_args_requires_sign_cert(self):
-        parser = argparse.ArgumentParser()
-        sub = parser.add_subparsers()
-        sign_with_aws_kms_prepare_cmd_args(sub)
-        # --sign-cert is required -> argparse exits.
-        with pytest.raises(SystemExit):
-            parser.parse_args(["sign-with-aws-kms-prepare", "/img"])
-
-    def test_sign_with_aws_kms_finish_cmd_args(self):
-        parser = argparse.ArgumentParser()
-        sub = parser.add_subparsers()
-        sign_with_aws_kms_finish_cmd_args(sub)
-
-        args = parser.parse_args(
-            ["sign-with-aws-kms-finish", "--image-root", "/img", "{}"]
-        )
-        assert args.handler is sign_with_aws_kms_finish_cmd
-        assert args.input == "{}"
-        assert args.image_root == "/img"
-
-    def test_sign_with_aws_kms_finish_cmd_args_image_root_defaults_none(self):
-        parser = argparse.ArgumentParser()
-        sub = parser.add_subparsers()
-        sign_with_aws_kms_finish_cmd_args(sub)
-
-        args = parser.parse_args(["sign-with-aws-kms-finish", "{}"])
-        assert args.image_root is None
 
 
 # ------ full round trip ------ #
