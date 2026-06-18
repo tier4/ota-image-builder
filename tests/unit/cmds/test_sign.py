@@ -18,7 +18,6 @@ from __future__ import annotations
 import datetime
 from argparse import Namespace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 from cryptography.hazmat.primitives import hashes
@@ -42,63 +41,10 @@ from ota_image_libs.v1.index_jwt.utils import (
 from ota_image_builder.cmds.sign import (
     _add_compat_to_image,
     _generate_dummy_metadata_jwt,
-    _load_private_key,
     load_cert_chains,
     sign_cmd,
     sign_image,
 )
-
-
-class TestLoadPrivateKey:
-    """Tests for _load_private_key function."""
-
-    SAMPLE_PEM_KEY = """-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
-OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
-1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
------END PRIVATE KEY-----"""
-
-    def test_load_from_pem_string(self):
-        """Test loading private key from PEM string directly."""
-        result = _load_private_key(self.SAMPLE_PEM_KEY)
-
-        assert result == self.SAMPLE_PEM_KEY.encode()
-
-    def test_load_from_file(self, tmp_path: Path):
-        """Test loading private key from file path."""
-        key_file = tmp_path / "private.pem"
-        key_file.write_text(self.SAMPLE_PEM_KEY)
-
-        result = _load_private_key(str(key_file))
-
-        assert result == self.SAMPLE_PEM_KEY.encode()
-
-    def test_empty_input_exits(self):
-        """Test that empty input causes SystemExit."""
-        with pytest.raises(SystemExit):
-            _load_private_key("")
-
-    def test_none_input_exits(self):
-        """Test that None input causes SystemExit."""
-        with pytest.raises(SystemExit):
-            _load_private_key(None)
-
-    def test_nonexistent_file_exits(self, tmp_path: Path):
-        """Test that non-existent file path causes SystemExit."""
-        nonexistent = tmp_path / "nonexistent.pem"
-
-        with pytest.raises(SystemExit):
-            _load_private_key(str(nonexistent))
-
-    def test_pem_string_starts_with_begin(self):
-        """Test that strings starting with -----BEGIN are treated as PEM."""
-        pem_like = (
-            "-----BEGIN RSA PRIVATE KEY-----\ndata\n-----END RSA PRIVATE KEY-----"
-        )
-
-        result = _load_private_key(pem_like)
-
-        assert result == pem_like.encode()
 
 
 def _generate_test_cert_and_key() -> tuple[bytes, bytes]:
@@ -204,56 +150,58 @@ class TestGenerateDummyMetadataJwt:
 class TestSignImage:
     """Tests for sign_image function."""
 
-    def test_sign_image_not_finalized_exits(self, tmp_path: Path):
+    def test_sign_image_not_finalized_exits(self, tmp_path: Path, mocker):
         """Test that signing non-finalized image exits."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
 
-        mock_cert_chain = MagicMock()
+        mock_cert_chain = mocker.MagicMock()
         key_pem = _generate_test_cert_and_key()[1]
 
-        with patch("ota_image_builder.cmds.sign.ImageIndexHelper") as mock_helper_class:
-            mock_helper = MagicMock()
-            mock_helper.image_index.image_finalized = False
-            mock_helper_class.return_value = mock_helper
+        mock_helper = mocker.MagicMock()
+        mock_helper.image_index.image_finalized = False
+        mocker.patch(
+            "ota_image_builder.cmds.sign.ImageIndexHelper", return_value=mock_helper
+        )
 
-            with pytest.raises(SystemExit):
-                sign_image(
-                    image_root,
-                    sign_cert_chain=mock_cert_chain,
-                    sign_key=key_pem,
-                    force_sign=False,
-                )
+        with pytest.raises(SystemExit):
+            sign_image(
+                image_root,
+                sign_cert_chain=mock_cert_chain,
+                sign_key=key_pem,
+                force_sign=False,
+            )
 
-    def test_sign_image_success(self, tmp_path: Path):
+    def test_sign_image_success(self, tmp_path: Path, mocker):
         """Test successful image signing."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
 
-        mock_cert_chain = MagicMock()
+        mock_cert_chain = mocker.MagicMock()
         key_pem = _generate_test_cert_and_key()[1]
 
-        with patch("ota_image_builder.cmds.sign.ImageIndexHelper") as mock_helper_class:
-            mock_helper = MagicMock()
-            mock_helper.image_index.image_finalized = True
-            mock_helper.sync_index.return_value = (None, b"test_descriptor")
-            mock_helper_class.return_value = mock_helper
+        mock_helper = mocker.MagicMock()
+        mock_helper.image_index.image_finalized = True
+        mock_helper.sync_index.return_value = (None, b"test_descriptor")
+        mocker.patch(
+            "ota_image_builder.cmds.sign.ImageIndexHelper", return_value=mock_helper
+        )
+        mocker.patch(
+            "ota_image_builder.cmds.sign.compose_index_jwt",
+            return_value="test.jwt.content",
+        )
 
-            with patch(
-                "ota_image_builder.cmds.sign.compose_index_jwt",
-                return_value="test.jwt.content",
-            ):
-                sign_image(
-                    image_root,
-                    sign_cert_chain=mock_cert_chain,
-                    sign_key=key_pem,
-                    force_sign=False,
-                )
+        sign_image(
+            image_root,
+            sign_cert_chain=mock_cert_chain,
+            sign_key=key_pem,
+            force_sign=False,
+        )
 
-                # Check that index.jwt was written
-                jwt_file = image_root / "index.jwt"
-                assert jwt_file.exists()
-                assert jwt_file.read_text() == "test.jwt.content"
+        # Check that index.jwt was written
+        jwt_file = image_root / "index.jwt"
+        assert jwt_file.exists()
+        assert jwt_file.read_text() == "test.jwt.content"
 
 
 class TestAddCompatToImage:
@@ -283,19 +231,6 @@ class TestAddCompatToImage:
         assert len(metadata_jwt.read_text().split(".")) == 3
 
 
-class TestLoadPrivateKeyExtended:
-    """Extended tests for _load_private_key function."""
-
-    def test_read_exception_exits(self, tmp_path: Path):
-        """Test that unreadable file causes SystemExit."""
-        # Create a directory instead of a file
-        key_path = tmp_path / "key_dir"
-        key_path.mkdir()
-
-        with pytest.raises(SystemExit):
-            _load_private_key(str(key_path))
-
-
 class TestSignCmd:
     """Tests for sign_cmd function."""
 
@@ -318,7 +253,7 @@ class TestSignCmd:
         with pytest.raises(SystemExit):
             sign_cmd(args)
 
-    def test_nonexistent_sign_cert_exits(self, tmp_path: Path):
+    def test_nonexistent_sign_cert_exits(self, tmp_path: Path, mocker):
         """Test that non-existent sign cert causes SystemExit."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
@@ -334,14 +269,14 @@ class TestSignCmd:
             legacy_compat=False,
         )
 
-        with patch(
+        mocker.patch(
             "ota_image_builder.cmds.sign.check_if_valid_ota_image",
             return_value=True,
-        ):
-            with pytest.raises(SystemExit):
-                sign_cmd(args)
+        )
+        with pytest.raises(SystemExit):
+            sign_cmd(args)
 
-    def test_nonexistent_ca_cert_exits(self, tmp_path: Path):
+    def test_nonexistent_ca_cert_exits(self, tmp_path: Path, mocker):
         """Test that non-existent CA cert causes SystemExit."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
@@ -360,14 +295,14 @@ class TestSignCmd:
             legacy_compat=False,
         )
 
-        with patch(
+        mocker.patch(
             "ota_image_builder.cmds.sign.check_if_valid_ota_image",
             return_value=True,
-        ):
-            with pytest.raises(SystemExit):
-                sign_cmd(args)
+        )
+        with pytest.raises(SystemExit):
+            sign_cmd(args)
 
-    def test_load_cert_chain_failure_exits(self, tmp_path: Path):
+    def test_load_cert_chain_failure_exits(self, tmp_path: Path, mocker):
         """Test that cert chain loading failure causes SystemExit."""
         image_root = tmp_path / "ota_image"
         image_root.mkdir()
@@ -386,12 +321,12 @@ class TestSignCmd:
             legacy_compat=False,
         )
 
-        with patch(
+        mocker.patch(
             "ota_image_builder.cmds.sign.check_if_valid_ota_image",
             return_value=True,
-        ):
-            with pytest.raises(SystemExit):
-                sign_cmd(args)
+        )
+        with pytest.raises(SystemExit):
+            sign_cmd(args)
 
 
 def _generate_encrypted_test_cert_and_key(
@@ -480,7 +415,7 @@ def _generate_test_ca_and_ee_chain() -> tuple[bytes, bytes, bytes]:
 class TestEncryptedPrivateKey:
     """Cryptography compatibility: passphrase-encrypted PKCS8 EC key handling.
 
-    `_load_private_key` itself only reads bytes, but the password is passed
+    Reading the key itself only returns bytes, but the password is passed
     through to `cryptography.hazmat.primitives.serialization.load_pem_private_key`
     inside `_generate_dummy_metadata_jwt` and `compose_index_jwt`. These tests
     pin that behavior so a `cryptography` upgrade can't silently regress it.
@@ -550,13 +485,13 @@ class TestSignImageRealJWTRoundTrip:
     """
 
     @staticmethod
-    def _patch_index_helper(descriptor: ImageIndex.Descriptor) -> MagicMock:
-        mock_helper = MagicMock()
+    def _patch_index_helper(mocker, descriptor: ImageIndex.Descriptor):
+        mock_helper = mocker.MagicMock()
         mock_helper.image_index.image_finalized = True
         mock_helper.sync_index.return_value = (None, descriptor)
         return mock_helper
 
-    def test_real_jwt_round_trip_unencrypted_key(self, tmp_path: Path):
+    def test_real_jwt_round_trip_unencrypted_key(self, tmp_path: Path, mocker):
         from cryptography.x509 import load_pem_x509_certificate
 
         _, ee_pem, ee_key_pem = _generate_test_ca_and_ee_chain()
@@ -572,16 +507,16 @@ class TestSignImageRealJWTRoundTrip:
             size=42,
         )
 
-        with patch(
+        mocker.patch(
             "ota_image_builder.cmds.sign.ImageIndexHelper",
-            return_value=self._patch_index_helper(descriptor),
-        ):
-            sign_image(
-                image_root,
-                sign_cert_chain=cert_chain,
-                sign_key=ee_key_pem,
-                force_sign=False,
-            )
+            return_value=self._patch_index_helper(mocker, descriptor),
+        )
+        sign_image(
+            image_root,
+            sign_cert_chain=cert_chain,
+            sign_key=ee_key_pem,
+            force_sign=False,
+        )
 
         jwt_str = (image_root / "index.jwt").read_text()
         extracted_chain = get_index_jwt_sign_cert_chain(jwt_str)
@@ -591,7 +526,7 @@ class TestSignImageRealJWTRoundTrip:
         assert claims.image_index.digest == descriptor.digest
         assert claims.image_index.size == descriptor.size
 
-    def test_real_jwt_round_trip_encrypted_key(self, tmp_path: Path):
+    def test_real_jwt_round_trip_encrypted_key(self, tmp_path: Path, mocker):
         passphrase = b"another-strong-passphrase"
 
         ca_key = ec.generate_private_key(ec.SECP256R1())
@@ -637,17 +572,17 @@ class TestSignImageRealJWTRoundTrip:
             size=128,
         )
 
-        with patch(
+        mocker.patch(
             "ota_image_builder.cmds.sign.ImageIndexHelper",
-            return_value=self._patch_index_helper(descriptor),
-        ):
-            sign_image(
-                image_root,
-                sign_cert_chain=cert_chain,
-                sign_key=ee_key_pem,
-                sign_key_passwd=passphrase,
-                force_sign=False,
-            )
+            return_value=self._patch_index_helper(mocker, descriptor),
+        )
+        sign_image(
+            image_root,
+            sign_cert_chain=cert_chain,
+            sign_key=ee_key_pem,
+            sign_key_passwd=passphrase,
+            force_sign=False,
+        )
 
         jwt_str = (image_root / "index.jwt").read_text()
         extracted_chain = get_index_jwt_sign_cert_chain(jwt_str)

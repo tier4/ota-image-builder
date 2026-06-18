@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Optional
 
@@ -22,7 +23,7 @@ import pytest
 import yaml
 from pydantic import BaseModel
 
-from ota_image_builder.cmds._utils import validate_annotations
+from ota_image_builder.cmds._utils import resolve_cli_input_arg, validate_annotations
 
 
 class SampleAnnotationModel(BaseModel):
@@ -99,3 +100,78 @@ class TestValidateAnnotations:
         assert "extra_field" not in result
         assert result["name"] == "test"
         assert result["version"] == "1.0.0"
+
+
+class TestResolveCliInputArg:
+    """Tests for the shared resolve_cli_input_arg helper (text + binary modes)."""
+
+    def test_inline_text_returned_verbatim(self):
+        assert (
+            resolve_cli_input_arg('{"a": 1}', inline_prefix="{", label="input")
+            == '{"a": 1}'
+        )
+
+    def test_inline_with_leading_whitespace(self):
+        assert (
+            resolve_cli_input_arg('   {"a": 1}', inline_prefix="{", label="input")
+            == '   {"a": 1}'
+        )
+
+    def test_inline_binary_is_encoded(self):
+        result = resolve_cli_input_arg(
+            "-----BEGIN KEY-----", inline_prefix="-----BEGIN", label="key", binary=True
+        )
+        assert result == b"-----BEGIN KEY-----"
+
+    def test_from_file_text(self, tmp_path: Path):
+        f = tmp_path / "in.json"
+        f.write_text('{"x": "y"}')
+        assert (
+            resolve_cli_input_arg(str(f), inline_prefix="{", label="input")
+            == '{"x": "y"}'
+        )
+
+    def test_from_file_binary(self, tmp_path: Path):
+        f = tmp_path / "in.bin"
+        f.write_bytes(b"\x00\x01rawbytes")
+        assert (
+            resolve_cli_input_arg(str(f), inline_prefix="{", label="input", binary=True)
+            == b"\x00\x01rawbytes"
+        )
+
+    def test_from_stdin_text(self, monkeypatch):
+        monkeypatch.setattr("sys.stdin", io.StringIO('{"s": true}'))
+        assert resolve_cli_input_arg("-", inline_prefix="{", label="input") == (
+            '{"s": true}'
+        )
+
+    def test_from_stdin_binary(self, monkeypatch):
+        class _Stdin:
+            buffer = io.BytesIO(b"raw-stdin-bytes")
+
+        monkeypatch.setattr("sys.stdin", _Stdin())
+        assert (
+            resolve_cli_input_arg("-", inline_prefix="{", label="input", binary=True)
+            == b"raw-stdin-bytes"
+        )
+
+    def test_empty_exits(self):
+        with pytest.raises(SystemExit):
+            resolve_cli_input_arg("", inline_prefix="{", label="input")
+
+    def test_none_exits(self):
+        with pytest.raises(SystemExit):
+            resolve_cli_input_arg(None, inline_prefix="{", label="input")
+
+    def test_nonexistent_file_exits(self, tmp_path: Path):
+        with pytest.raises(SystemExit):
+            resolve_cli_input_arg(
+                str(tmp_path / "missing.json"), inline_prefix="{", label="input"
+            )
+
+    def test_unreadable_path_exits(self, tmp_path: Path):
+        # Reading a directory raises IsADirectoryError -> generic read-failure path.
+        a_dir = tmp_path / "a_dir"
+        a_dir.mkdir()
+        with pytest.raises(SystemExit):
+            resolve_cli_input_arg(str(a_dir), inline_prefix="{", label="input")
