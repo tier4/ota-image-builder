@@ -15,6 +15,7 @@ docker build --no-cache --build-arg=TAR_VERSION=${TAR_VERSION} -t tar-static:${T
 ```
 
 Push to github ecr:
+
 ```bash
 docker push ghcr.io/tier4/ota-image-builder/tar-static:1.35
 ```
