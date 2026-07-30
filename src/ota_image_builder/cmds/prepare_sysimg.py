@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+from ipaddress import ip_address
 from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -72,12 +73,30 @@ RESOLV_CONF_SYMLINK_TARGET = "../run/systemd/resolve/stub-resolv.conf"
 # Matches a `nameserver <addr>` directive line (leading whitespace tolerated),
 # with <addr> restricted to IPv4/IPv6-like values (hex digits, `:` and `.`).
 # Commented out lines (starting with `#`) don't match and are thus ignored.
-NAMESERVER_PA = re.compile(r"^\s*nameserver\s+[a-fA-F0-9:\.]+", re.MULTILINE)
+NAMESERVER_PA = re.compile(r"^\s*nameserver\s+(?P<addr>[a-fA-F0-9:\.]+)", re.MULTILINE)
 
 
-def _is_valid_resolv_conf(content: str) -> bool:
-    """A simple check to the contents of a resolv.conf."""
-    return NAMESERVER_PA.search(content) is not None
+def _parse_nameservers(content: str) -> list[str]:
+    """Extract the addrs of all the `nameserver` directives in a resolv.conf."""
+    return [_m.group("addr") for _m in NAMESERVER_PA.finditer(content)]
+
+
+def _is_loopback_addr(addr: str) -> bool:
+    try:  # strip the IPv6 zone index(like `fe80::1%eth0`) before parsing
+        return ip_address(addr.partition("%")[0]).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_keepable_resolv_conf(content: str) -> bool:
+    """Whether an existing regular /etc/resolv.conf file can be kept as it is.
+
+    A resolv.conf is only kept when it merely points the resolver to a local stub
+    resolver, i.e. it has at least one `nameserver` directive and all of them are
+    loopback addrs.
+    """
+    _nameservers = _parse_nameservers(content)
+    return bool(_nameservers) and all(map(_is_loopback_addr, _nameservers))
 
 
 def _load_extra_patterns_from_file(_f: str) -> list[str]:
@@ -155,16 +174,38 @@ class RootfsImagePreparer:
         """Ensure /etc/resolv.conf is valid, otherwise fix it up."""
         resolv_conf = self._rootfs_dir / RESOLV_CONF_RELPATH
         if resolv_conf.is_symlink():
+            logger.info(f"{resolv_conf} is a symlink, normalizing it")
             resolv_conf.unlink(missing_ok=True)
         if resolv_conf.is_dir():  # how could it be a dir?
+            logger.warning(f"{resolv_conf} is a dir(!), removing it")
             shutil.rmtree(resolv_conf, ignore_errors=True)
 
         if resolv_conf.is_file():
             try:
-                if not _is_valid_resolv_conf(resolv_conf.read_text()):
-                    raise ValueError("invalid resolv.conf")
-                return
-            except Exception:
+                _content = resolv_conf.read_text()
+            except Exception as e:
+                logger.warning(
+                    f"{resolv_conf} is not readable as text({e!r}), removing it"
+                )
+                resolv_conf.unlink(missing_ok=True)
+            else:
+                if _is_keepable_resolv_conf(_content):
+                    logger.info(
+                        f"{resolv_conf} only refers to a local stub resolver, "
+                        "keep it as it is"
+                    )
+                    return
+
+                if _nameservers := _parse_nameservers(_content):
+                    logger.warning(
+                        f"{resolv_conf} refers to external DNS server(s) {_nameservers}, "
+                        "which is most likely leaked from the build environment "
+                        "and unreachable on the target, removing it"
+                    )
+                else:
+                    logger.warning(
+                        f"{resolv_conf} has no valid nameserver directive, removing it"
+                    )
                 resolv_conf.unlink(missing_ok=True)
         else:  # thing that is not symlink, dir or regular file
             resolv_conf.unlink(missing_ok=True)
