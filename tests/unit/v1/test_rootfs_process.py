@@ -15,11 +15,18 @@
 
 from __future__ import annotations
 
+import os
+import stat
 import threading
 from pathlib import Path
 from queue import Queue
 
-from ota_image_libs.v1.file_table.schema import FileTableInode
+import pytest
+from ota_image_libs.v1.file_table.schema import (
+    FileTableDirectories,
+    FileTableInode,
+    FileTableRegularFiles,
+)
 
 import ota_image_builder.v1._resource_process._rootfs_process as rp_module
 from ota_image_builder._configs import cfg
@@ -283,6 +290,88 @@ class TestSystemImageProcesser:
         assert processor._worker_threads == 2
         assert processor._read_chunk_size == 4096
         assert processor._inline_threshold == 1024
+
+    def test_init_resolves_symlinked_src(self, tmp_path: Path):
+        """A symlink given as src is resolved to the real rootfs directory."""
+        real_src = tmp_path / "real_src"
+        real_src.mkdir()
+        link_src = tmp_path / "link_src"
+        link_src.symlink_to(real_src)
+
+        processor = SystemImageProcesser(
+            Queue(), src=link_src, resource_dir=tmp_path / "resources"
+        )
+
+        assert processor._src == real_src
+
+    def test_init_rejects_missing_src(self, tmp_path: Path):
+        with pytest.raises(FileNotFoundError):
+            SystemImageProcesser(
+                Queue(), src=tmp_path / "missing", resource_dir=tmp_path / "resources"
+            )
+
+    def test_process_sysimg_src_rejects_non_directory_src(self, tmp_path: Path):
+        not_a_dir = tmp_path / "rootfs.img"
+        not_a_dir.write_bytes(b"")
+        resource_dir = tmp_path / "resources"
+        resource_dir.mkdir()
+
+        processor = SystemImageProcesser(
+            Queue(), src=not_a_dir, resource_dir=resource_dir
+        )
+
+        with pytest.raises(ValueError, match="not a directory"):
+            processor.process_sysimg_src()
+
+    def test_process_sysimg_src_symlinked_src_records_root_as_directory(
+        self, tmp_path: Path
+    ):
+        """The `/` entry takes the real rootfs dir's inode, not the symlink's.
+
+        Regression test: a build pipeline handing over a symlink to the rootfs made
+        `/` be recorded with the symlink's lstat, mode 0o120777, which the update
+        agent then applied to the slot root as 0777.
+        """
+        real_src = tmp_path / "real_src"
+        real_src.mkdir()
+        os.chmod(real_src, 0o755)
+        (real_src / "etc").mkdir()
+        (real_src / "etc" / "hostname").write_text("ecu\n")
+        link_src = tmp_path / "link_src"
+        link_src.symlink_to(real_src)
+        resource_dir = tmp_path / "resources"
+        resource_dir.mkdir()
+
+        que: Queue = Queue()
+        processor = SystemImageProcesser(
+            que, src=link_src, resource_dir=resource_dir, worker_threads=2
+        )
+        processor.process_sysimg_src()
+
+        inodes: dict[int, FileTableInode] = {}
+        dirs: dict[str, FileTableDirectories] = {}
+        regulars: dict[str, FileTableRegularFiles] = {}
+        while (entry := que.get(timeout=10)) is not None:
+            if isinstance(entry, FileTableInode):
+                inodes[entry.inode_id] = entry
+            elif isinstance(entry, FileTableDirectories):
+                dirs[entry.path] = entry
+            elif isinstance(entry, FileTableRegularFiles):
+                regulars[entry.path] = entry
+
+        # the tree is walked through the symlink, with canonical paths
+        assert set(dirs) == {"/", "/etc"}
+        assert set(regulars) == {"/etc/hostname"}
+
+        root_inode = inodes[dirs["/"].inode_id]
+        real_stat = real_src.stat()
+        assert stat.S_ISDIR(root_inode.mode)
+        assert root_inode.mode == real_stat.st_mode
+        assert stat.S_IMODE(root_inode.mode) == 0o755
+        assert (root_inode.uid, root_inode.gid) == (
+            real_stat.st_uid,
+            real_stat.st_gid,
+        )
 
     def test_thread_worker_initializer(self):
         """Test that thread worker initializer sets up buffer."""
