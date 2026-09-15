@@ -253,9 +253,9 @@ def add_image_cmd(args: Namespace) -> None:
     if image_index.image_finalized or image_index.image_signed:
         exit_with_err_msg("Modifying an already finalized image is NOT allowed, abort!")
 
-    rootfs_path = Path(args.rootfs)
+    rootfs_path = Path(args.rootfs).resolve()
     if not rootfs_path.is_dir():
-        exit_with_err_msg(f"Rootfs path {rootfs_path} is not a directory.")
+        exit_with_err_msg(f"Rootfs path {args.rootfs} is not a directory.")
 
     logger.info(
         f"Will add image payload from {rootfs_path} into OTA image at {image_root} ..."

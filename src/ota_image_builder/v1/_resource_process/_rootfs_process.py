@@ -21,6 +21,7 @@ import logging
 import os
 import shutil
 import signal
+import stat
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from functools import partial
@@ -138,7 +139,7 @@ class SystemImageProcesser:
         self._read_chunk_size = read_chunk_size
         self._que = que
 
-        self._src = src
+        self._src = Path(src).resolve(strict=True)
         self._resource_dir = resource_dir
 
         self._inode_count = itertools.count(start=1)
@@ -312,6 +313,11 @@ class SystemImageProcesser:
     def process_sysimg_src(self):
         thread_local = threading.local()
         CANONICAL_ROOT_P = Path("/")
+
+        # <src> becomes `/`: it must be a real directory, nothing else may be
+        # recorded as the root of the image (see __init__).
+        if not stat.S_ISDIR(os.lstat(self._src).st_mode):
+            raise ValueError(f"{self._src} is not a directory, cannot be the rootfs")
 
         # NOTE: add empty entry in ft_resource table for fastpath processing empty file
         self._add_entries_to_ft_resource(
