@@ -189,8 +189,13 @@ class SliceFilterProcesser:
     # ------------------------ #
 
     def _update_db(self, sliced: SliceResult) -> None:
+        # NOTE: <sliced> is appended by the worker threads, so its order is the
+        #   thread completion order. Apply the results in resource_id order instead,
+        #   otherwise the resource_ids assigned to the newly inserted slices, and
+        #   thus the resource table blob digest, depend on the thread scheduling.
+        _sorted_sliced = sorted(sliced, key=lambda _entry: _entry[0])
         with self._db_helper.get_orm() as rs_orm:
-            for batch in batched(sliced, self._update_batch, strict=False):
+            for batch in batched(_sorted_sliced, self._update_batch, strict=False):
                 _update_one_batch(rs_orm, batch)
 
     def _process_slicing(self) -> tuple[int, Size, SliceResult]:
@@ -216,6 +221,9 @@ class SliceFilterProcesser:
                         "AND", "filter_applied IS NULL",
                         end_with=None,
                     ),
+                    # NOTE: pin the row order to resource_id, see the note in
+                    #   _bundle_filter.py for the rationale.
+                    order_by=("resource_id",),
                 ),
                 _row_factory=sqlite3.Row,
             ):

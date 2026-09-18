@@ -192,6 +192,9 @@ class CompressionFilterProcesser:
                 select_from=rs_orm.orm_table_name,
                 select_cols=("resource_id", "digest", "size"),
                 where_stmt=f"WHERE size > {self._lower_bound} AND filter_applied IS NULL",
+                # NOTE: pin the row order to resource_id, see the note in
+                #   _bundle_filter.py for the rationale.
+                order_by=("resource_id",),
             )
 
             submit_with_se = func_call_with_se(pool.submit, self._se)
@@ -211,6 +214,13 @@ class CompressionFilterProcesser:
         return origin_size, compressed
 
     def _update_db(self, compressed: CompressionResult) -> None:
+        # NOTE: <compressed> is filled in by the worker threads, so its iteration
+        #   order is the thread completion order. Apply the results in origin
+        #   resource_id order instead, otherwise the resource_ids assigned to the
+        #   newly inserted compressed resources, and thus the resource table blob
+        #   digest, depend on the thread scheduling.
+        _sorted_compressed = sorted(compressed.items())
+
         with self._db_helper.get_orm() as rs_orm:
             # NOTE: DO NOT overwrite the already there resources if any!
             rs_orm.orm_insert_mappings(
@@ -219,14 +229,14 @@ class CompressionFilterProcesser:
                         digest=compressed_digest,
                         size=compressed_size,
                     )
-                    for compressed_digest, compressed_size in compressed.values()
+                    for _, (compressed_digest, compressed_size) in _sorted_compressed
                 ),
                 or_option="ignore",
             )
 
             # batch queries to select compressed entries from db
             compressed_entries: dict[Sha256DigestBytes, ResourceID] = {}
-            for _batch in batched(compressed.values(), SELECT_BATCH_SIZE, strict=False):
+            for _batch in batched(_sorted_compressed, SELECT_BATCH_SIZE, strict=False):
                 _params_holder = ",".join(itertools.repeat("?", len(_batch)))
                 # fmt: off
                 _query_res = rs_orm.orm_execute(
@@ -235,7 +245,7 @@ class CompressionFilterProcesser:
                         "FROM", rs_orm.orm_table_name,
                         "WHERE", "digest", "IN", f"({_params_holder})"
                     ),
-                    params=tuple(_digest[0] for _digest in _batch),
+                    params=tuple(_entry[1][0] for _entry in _batch),
                     row_factory=typing.cast(
                         typing.Callable[..., tuple[Sha256DigestBytes, ResourceID]], sqlite3.Row
                     ),
@@ -244,6 +254,8 @@ class CompressionFilterProcesser:
                 compressed_entries.update(_query_res)
 
             # update the original entries
+            # NOTE: <set_cols_value> and <where_cols_value> are zipped pairwise by
+            #   the ORM, so both MUST iterate <_sorted_compressed> in the same order.
             rs_orm.orm_update_entries_many(
                 set_cols=("filter_applied",),
                 set_cols_value=(
@@ -253,12 +265,12 @@ class CompressionFilterProcesser:
                             compression_alg=ZSTD_COMPRESSION_ALG,
                         )
                     )
-                    for compressed_digest, _ in compressed.values()
+                    for _, (compressed_digest, _) in _sorted_compressed
                 ),
                 where_cols=("resource_id",),
                 where_cols_value=(
                     ResourceTableManifestTypedDict(resource_id=_resource_id)
-                    for _resource_id in compressed
+                    for _resource_id, _ in _sorted_compressed
                 ),
             )
 

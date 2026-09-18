@@ -270,6 +270,12 @@ class BundleFilterProcesser:
                         "AND", "filter_applied", "IS NULL",
                         end_with=None,
                     ),
+                    # NOTE: an unordered SELECT has no guaranteed row order, it is
+                    #   whatever the query plan yields. Pin it to resource_id so that
+                    #   the bundle packing is reproducible. resource_id follows the
+                    #   rootfs walk order, and keeping that clustering is what keeps
+                    #   the OTA over-fetch low.
+                    order_by=("resource_id",),
                 ),
                 _row_factory=sqlite3.Row,
             ) # type: ignore[assignment]
