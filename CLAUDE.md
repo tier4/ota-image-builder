@@ -7,13 +7,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `ota-image-builder` is a Python CLI tool that builds OTA update images from system rootfs images.
 It is based on `ota-image-libs`, following the [OTA image specification version 1](https://github.com/tier4/ota-image-libs/tree/main/spec).
 
-The builder converts a system rootfs into an optimized OTA image by:
+The builder converts a system rootfs into an optimized OTA image (a **file-based** payload) by:
 
 - Scanning the rootfs and registering all file entries and resources (blobs) into SQLite databases (file_table, resource_table).
 - Deduplicating resources by SHA256 content addressing into a flat blob storage (`blobs/sha256/`).
 - At image build finalizing, applying storage optimization filters: bundling small files, compressing blobs with zstd, slicing large files.
 - Signing the image index by ES256 JWT with X.509 certificate chains.
 - Packing into a reproducible ZIP artifact for distribution.
+
+It also adds **partition-based** payloads (`add-partition-image`, `cmds/add_partition_image.py`): whole partition images or a vendor package that the platform's tooling has already produced, described by a spec JSON, copied into the blob storage as they are (never bundled, compressed or sliced by `finalize`) and described by a `PartitionImageConfig`/`PartitionImageManifest` from `ota_image_libs.v1.partition_image`. An image holding only partition-based payloads has no resource_table; `finalize` then only counts the blobs. A partition entry may also carry a **delta** (`PartitionDeltaDescriptor`, media type `…partition-delta.v1`) that reconstructs its image from bytes the device already has; the spec names it with `"delta": {file, algorithm, source: {digest, size}}` and `"store_image": false` keeps the image's own bytes out of the payload. The image is still described — digest, size, verity — because that is what the agent verifies the reconstruction against.
 
 ## Commands for Dev
 

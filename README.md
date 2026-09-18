@@ -84,6 +84,54 @@ ota-image-builder pack-artifact \
   ota_image/
 ```
 
+### Partition-based payloads
+
+For a device whose root is read-only and integrity-protected, the payload is not the files of a rootfs but whole partition images (see the [partition-based payload spec](https://github.com/tier4/ota-image-libs/blob/main/spec/partition_image.md)).
+The platform's own tooling produces the blobs — a root filesystem image with its dm-verity hash tree, the boot files that carry the root hash — and a small spec JSON beside them; `add-partition-image` takes over from there, in place of step 4:
+
+```bash
+ota-image-builder add-partition-image \
+  --annotations-file annotations.yaml \
+  --release-key dev \
+  --sys-config "ecu_id:sys_config.yaml" \
+  --spec /path/to/blobs/spec.json \
+  ota_image/
+```
+
+```json
+{
+  "delivery": "direct",
+  "version": "1.2.0",
+  "partitions": [
+    {"name": "rootfs", "action": "write", "image": "rootfs.img",
+     "filesystem": "ext4", "verity": {"root_hash": "…", "hash_offset": 1468006400}},
+    {"name": "boot",     "action": "write", "image": "boot.tar"},
+    {"name": "scratch",  "action": "mkfs"},
+    {"name": "identity", "action": "keep"},
+    {"name": "optdata",  "action": "keep"}
+  ]
+}
+```
+
+`"delivery": "vendor-package"` with `"package": {"file": "…", "format": "…"}` describes one opaque package the platform's own updater applies.
+The blobs go into the blob storage as they are (`finalize` never bundles, compresses or slices them) and `pack-artifact` stores them uncompressed, so an update agent can stream a partition image straight from the artifact onto the partition.
+The `sys_config` of such a payload is informational: its items are applied when the image is built.
+
+A partition may ship a **binary delta** instead of its image, so that a campaign transfers the change rather than the whole partition:
+
+```json
+{"name": "rootfs", "action": "write", "image": "rootfs.img",
+ "filesystem": "ext4", "verity": {"root_hash": "…", "hash_offset": 1468006400},
+ "store_image": false,
+ "delta": {"file": "rootfs.delta.zst", "algorithm": "zstd-patch-from",
+           "source": {"digest": "sha256:…", "size": 1479573504}}}
+```
+
+The image file is still named so that its digest, size and verity go into the payload: that is what the agent verifies the reconstruction against.
+`"source"` names the bytes the delta applies to, by digest, because on the device those bytes are the committed slot's own partition and a digest identifies them exactly.
+With `"store_image": false` only the delta ships; with the default both ship, so that one image serves devices at any version.
+Blobs stay uncompressed for this reason too: a delta between raw partition images is small, one between compressed images is not.
+
 ### Subcommands
 
 | Command | Description |
@@ -94,7 +142,8 @@ ota-image-builder pack-artifact \
 | `init` | Initialize an empty OTA image |
 | `build-annotation` | Build/merge annotation YAML files |
 | `build-exclude-cfg` | Build exclusion glob pattern files |
-| `add-image` | Add a system image payload to the OTA image |
+| `add-image` | Add a system image payload (file-based) to the OTA image |
+| `add-partition-image` | Add a partition-based payload: whole partition images or a vendor package, from a spec JSON |
 | `add-otaclient-package` | Add an OTAClient release package |
 | `add-otaclient-package-compat` | Add an OTAClient package in legacy-compatible format |
 | `finalize` | Optimize blob storage and finalize the image |

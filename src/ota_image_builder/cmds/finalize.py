@@ -24,6 +24,7 @@ from ota_image_libs.common import tmp_fname
 from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 from ota_image_libs.v1.image_manifest.schema import ImageManifest
 from ota_image_libs.v1.otaclient_package.schema import OTAClientPackageManifest
+from ota_image_libs.v1.partition_image.schema import PartitionImageManifest
 from ota_image_libs.v1.resource_table.schema import (
     ZstdCompressedResourceTableDescriptor,
 )
@@ -133,6 +134,18 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
             _res.add(_manifest.config.digest.digest)
             for _payload in _manifest.layers:
                 _res.add(_payload.digest.digest)
+        elif isinstance(manifest_descriptor, PartitionImageManifest.Descriptor):
+            # partition images are streamed onto partitions as they are: never
+            #   bundled, compressed or sliced (spec: partition_image.md)
+            _manifest = manifest_descriptor.load_metafile_from_resource_dir(
+                _resource_dir
+            )
+            _res.add(_manifest.config.digest.digest)
+            for _payload in _manifest.layers:
+                _res.add(_payload.digest.digest)
+            _config = _manifest.config.load_metafile_from_resource_dir(_resource_dir)
+            if _sys_config_descriptor := _config.sys_config:
+                _res.add(_sys_config_descriptor.digest.digest)
     return _res
 
 
@@ -153,10 +166,24 @@ def finalize_cmd(args: Namespace) -> None:
     resource_dir = index_helper.image_resource_dir
     _old_rstable_descriptor = index_helper.image_index.image_resource_table
     if _old_rstable_descriptor is None:
-        exit_with_err_msg(
-            "The OTA image doesn't have a resource_table, "
-            "please add at least one image payload into the OTA image."
+        if not index_helper.image_index.image_identifiers:
+            exit_with_err_msg(
+                "The OTA image has no image payload, "
+                "please add at least one image payload into the OTA image."
+            )
+        # only partition-based payloads: their blobs are stored as they are and
+        #   there is no resource_table to optimize; finalize the index as it is
+        logger.info(
+            "No resource_table (partition-based payloads only): "
+            "nothing to optimize, finalizing the OTA image as it is."
         )
+        total_blobs_count, total_blobs_size = count_blobs_in_dir(resource_dir)
+        index_helper.image_index.finalize_image(
+            total_blobs_count=total_blobs_count,
+            total_blobs_size=total_blobs_size,
+        )
+        index_helper.sync_index()
+        return
 
     with TemporaryDirectory(dir=args.tmp_dir) as tmp_workdir:
         logger.debug(f"Using temporary workdir: {tmp_workdir}")
