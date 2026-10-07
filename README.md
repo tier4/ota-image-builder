@@ -179,8 +179,8 @@ What boots before any partition image is read -- the bootloader chain and the fi
 | `build-exclude-cfg` | Build exclusion glob pattern files |
 | `add-image` | Add a system image payload (file-based) to the OTA image |
 | `add-partition-image` | Add a partition-based payload: whole partition images or a vendor package, from a spec JSON |
-| `add-otaclient-package` | Add an OTAClient release, as the OTAClient release package and as the image's update agent release package |
-| `add-update-agent-package` | Add any update agent's bundle(s) as the image's update agent release package |
+| `add-otaclient-package` | Add an OTAClient release package |
+| `add-update-agent-package` | Add an update agent's bundle(s) as the image's update agent release package (see the note below) |
 | `add-otaclient-package-compat` | Add an OTAClient package in legacy-compatible format |
 | `finalize` | Optimize blob storage and finalize the image |
 | `sign` | Sign the finalized image with ES256 JWT |
@@ -188,6 +188,8 @@ What boots before any partition image is read -- the bootloader chain and the fi
 
 Use `-d`/`--debug` for debug logging.
 Run `ota-image-builder <command> --help` for detailed usage of each subcommand.
+
+**Compatibility note.** A consumer refuses an `index.json` that lists a manifest kind its ota-image-libs does not know, so an image must carry only entries every one of its consumers can read. The update agent release package (`add-update-agent-package`) is known from ota-image-libs 0.6.0 on: an image that otaclient releases before that (v3.14 and earlier) or other tools on an older library must read carries none, and `add-otaclient-package` therefore writes the OTAClient release package only. Partition-based payloads are read as file-based descriptors by older libraries and do not stop them from finding their own payload.
 
 ## Specification
 

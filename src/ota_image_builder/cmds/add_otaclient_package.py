@@ -11,8 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""`add-otaclient-package`: an otaclient release directory, as the OTAClient release
-package and as update agent bundles."""
+"""Add otaclient release package into OTA image."""
 
 from __future__ import annotations
 
@@ -21,16 +20,11 @@ from argparse import Namespace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ota_image_libs.v1.consts import RESOURCE_DIR
+from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 from ota_image_libs.v1.otaclient_package.utils import add_otaclient_package
-from ota_image_libs.v1.update_agent_package.utils import (
-    bundles_from_otaclient_release,
-)
 
-from ota_image_builder._common import exit_with_err_msg
-from ota_image_builder.cmds.add_update_agent_package import (
-    add_bundles,
-    open_image_for_agent_package,
-)
+from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser, _SubParsersAction
@@ -63,26 +57,32 @@ def add_otaclient_package_cmd_args(
 
 def add_otaclient_package_cmd(args: Namespace) -> None:
     logger.debug(f"calling {add_otaclient_package_cmd.__name__} with {args}")
+    image_root = Path(args.image_root)
+    if not check_if_valid_ota_image(image_root):
+        exit_with_err_msg(f"{image_root} is not a valid OTA image root directory.")
+
     release_dir = Path(args.release_dir)
     if not release_dir.is_dir():
         exit_with_err_msg(f"{release_dir} doesn't exist.")
 
-    index_helper = open_image_for_agent_package(Path(args.image_root))
+    logger.info(
+        f"Will try to add otaclient release package from {release_dir} to OTA image at {image_root} ..."
+    )
+
+    index_helper = ImageIndexHelper(image_root=image_root)
     image_index = index_helper.image_index
+    if image_index.image_finalized or image_index.image_signed:
+        exit_with_err_msg("Modifying an already finalized image is NOT allowed, abort!")
+
     if image_index.find_otaclient_package():
         exit_with_err_msg(
             "OTAClient release package has already been added into the OTA image, abort!"
         )
-    bundles = bundles_from_otaclient_release(release_dir)
-    if not bundles:
-        exit_with_err_msg(f"{release_dir} holds no squashfs release to add.")
 
-    # otaclient up to v3.14 finds its release through the OTAClient release package
-    #   entry, later versions through the update agent one. Both are written, sharing
-    #   the blobs, until no fleet runs the former.
-    logger.info(f"Add otaclient release package from {release_dir} ...")
     image_index.add_otaclient_package(
-        add_otaclient_package(release_dir, resource_dir=index_helper.image_resource_dir)
+        add_otaclient_package(
+            release_dir,
+            resource_dir=image_root / RESOURCE_DIR,
+        )
     )
-    add_bundles(index_helper, bundles)
     index_helper.sync_index()

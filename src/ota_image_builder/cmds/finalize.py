@@ -135,8 +135,7 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
                 OTAClientPackageManifest.Descriptor,
             ),
         ):
-            # the agent's bundles, under either manifest kind: an image from an older
-            # step of the pipeline still carries the otaclient one
+            # the agent's bundles, under either manifest kind
             _manifest = manifest_descriptor.load_metafile_from_resource_dir(
                 _resource_dir
             )

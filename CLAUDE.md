@@ -92,7 +92,7 @@ The builder provides the following subcommands (registered in `main.py`):
 | `build-exclude-cfg` | `build_exclude_cfg.py` | Build exclusion glob pattern files |
 | `add-image` | `add_image.py` | Add system image to OTA image (core operation — processes rootfs, creates file_table, resource_table, manifests) |
 | `add-partition-image` | `add_partition_image.py` | Add a partition-based payload from a spec JSON (composition in `v1/_partition_image.py`) |
-| `add-otaclient-package` | `add_otaclient_package.py` | Add an OTAClient release, as the OTAClient release package and as the update agent release package |
+| `add-otaclient-package` | `add_otaclient_package.py` | Add OTAClient release package (never the update agent release package: clients on ota-image-libs < 0.6.0 refuse an index with a manifest kind they do not know) |
 | `add-otaclient-package-compat` | `add_otaclient_package_compat.py` | Legacy OTAClient compatibility |
 | `add-update-agent-package` | `add_update_agent_package.py` | Add update agent bundles (the agent that applies the image) |
 | `finalize` | `finalize.py` | Optimize blobs (bundle, compress, slice filters) and finalize image |
