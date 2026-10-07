@@ -113,24 +113,59 @@ ota-image-builder add-partition-image \
 }
 ```
 
+A written role named `boot` is the slot's boot files, a tar unpacked into the boot directory; every other written role is a partition image, written as it is.
 `"delivery": "vendor-package"` with `"package": {"file": "…", "format": "…"}` describes one opaque package the platform's own updater applies.
-The blobs go into the blob storage as they are (`finalize` never bundles, compresses or slices them) and `pack-artifact` stores them uncompressed, so an update agent can stream a partition image straight from the artifact onto the partition.
+Partition images, data images, firmware packages and the vendor package are stored **zstd-compressed** (`--zstd-level`, default 19 with long-range matching; `--no-compress` stores them as they are); the descriptor then names the stored bytes and its annotations what they decode to, and the agent decodes the blob on its way to the partition.
+`finalize` never bundles, compresses or slices these blobs and `pack-artifact` stores them as they are, so an agent streams a partition image straight from the artifact.
 The `sys_config` of such a payload is informational: its items are applied when the image is built.
 
-A partition may ship a **binary delta** instead of its image, so that a campaign transfers the change rather than the whole partition:
+A partition may ship a **block diff** against a previous build instead of its image, so that a campaign transfers the change rather than the whole partition. The delta is built by `add-partition-image` from the previous build's image, named in the spec or on the command line, and the payload then carries the delta alone:
 
 ```json
 {"name": "rootfs", "action": "write", "image": "rootfs.img",
  "filesystem": "ext4", "verity": {"root_hash": "…", "hash_offset": 1468006400},
- "store_image": false,
- "delta": {"file": "rootfs.delta.zst", "algorithm": "zstd-patch-from",
-           "source": {"digest": "sha256:…", "size": 1479573504}}}
+ "delta": {"from": "../1.1.0/rootfs.img"}}
+```
+
+```bash
+ota-image-builder add-partition-image ... --delta-from rootfs=/releases/1.1.0/rootfs.img ota_image/
 ```
 
 The image file is still named so that its digest, size and verity go into the payload: that is what the agent verifies the reconstruction against.
-`"source"` names the bytes the delta applies to, by digest, because on the device those bytes are the committed slot's own partition and a digest identifies them exactly.
-With `"store_image": false` only the delta ships; with the default both ship, so that one image serves devices at any version.
-Blobs stay uncompressed for this reason too: a delta between raw partition images is small, one between compressed images is not.
+The delta names the bytes it applies to by digest, because on the device those bytes are the committed slot's own partition and a digest identifies them exactly; the agent reads them where they lie, so a delta of any size needs no staging space. A device at another version needs a payload built for it.
+Measured on two builds of an 8.15 GiB rootfs image: 109 MB as a delta, 2.40 GB as a compressed image, 8.75 GB raw.
+
+#### Data images
+
+What changes on its own cadence -- a set of ML models, say -- rides beside the partitions as a **data image**: a read-only filesystem image with its verity hash tree appended, which the device keeps as a file outside the slots and mounts at a path. The spec lists them under `data_images`; the agent that applies the payload writes them, under either delivery:
+
+```json
+"data_images": [
+  {"name": "models", "version": "2026.9.1", "mount": "/opt/models",
+   "image": "models.img", "filesystem": "squashfs",
+   "verity": {"root_hash": "…", "hash_offset": 209715200},
+   "requires": {"rootfs": {"min": "1.2.0", "max": "2.0.0"}}}
+]
+```
+
+`requires` pins which rootfs (or other data image) versions the image goes with; the device refuses the rest. A data image is stored compressed and may ship as a block diff like a partition (`"delta": {"from": …}` or `--delta-from models=/releases/2026.8.0/models.img`, against the image the device holds; `--delta-from data:NAME=IMAGE` when a data image and a partition role share a name). A data image that did not change since that release ships as a delta from itself -- a few bytes saying so -- which is why the data image build is reproducible (fixed timestamps, derived UUIDs). The same spec also builds the payload that updates the data images **alone**:
+
+```bash
+ota-image-builder add-partition-image ... --data-only ota_image/
+```
+
+Every partition is then `keep` and no partition blob is stored, so a release spec yields both the rootfs release and the data-image-only campaign, and the two share the data image blob by digest.
+
+#### Firmware
+
+What boots before any partition image is read -- the bootloader chain and the firmware beside it -- is the platform's own updater's to write, from a package in its format. The spec names that package under `firmware`, so that it travels with the release, is verified with it and is judged by the same trial boot; the agent stages it where the platform's updater picks it up (a UEFI capsule on the EFI system partition, say) and the platform applies it on the reboot:
+
+```json
+"firmware": {"name": "firmware", "version": "2.0.0", "format": "<the platform updater's package format>",
+             "file": "firmware.pkg", "requires": {"rootfs": {"min": "2.2.0"}}}
+```
+
+`format` is opaque here; an agent applies the formats its platform takes and refuses the rest. Firmware is slotted with the boot chain where it is slotted at all, so on a platform whose rootfs slot follows the boot chain a firmware update is also a slot switch: the payload carries the slot roles too, if only as a block diff that copies the committed slot. `--data-only` drops it along with the partitions.
 
 ### Subcommands
 
@@ -144,7 +179,8 @@ Blobs stay uncompressed for this reason too: a delta between raw partition image
 | `build-exclude-cfg` | Build exclusion glob pattern files |
 | `add-image` | Add a system image payload (file-based) to the OTA image |
 | `add-partition-image` | Add a partition-based payload: whole partition images or a vendor package, from a spec JSON |
-| `add-otaclient-package` | Add an OTAClient release package |
+| `add-otaclient-package` | Add an OTAClient release, as the OTAClient release package and as the image's update agent release package |
+| `add-update-agent-package` | Add any update agent's bundle(s) as the image's update agent release package |
 | `add-otaclient-package-compat` | Add an OTAClient package in legacy-compatible format |
 | `finalize` | Optimize blob storage and finalize the image |
 | `sign` | Sign the finalized image with ES256 JWT |

@@ -28,6 +28,7 @@ from ota_image_libs.v1.partition_image.schema import PartitionImageManifest
 from ota_image_libs.v1.resource_table.schema import (
     ZstdCompressedResourceTableDescriptor,
 )
+from ota_image_libs.v1.update_agent_package.schema import UpdateAgentPackageManifest
 
 from ota_image_builder._common import (
     check_if_valid_ota_image,
@@ -97,7 +98,7 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
     When optimizing the blob storage, we MUST skip processing these digests.
     The blobs that don't belong any image payload:
     1. image_payload: sys_config and file_table files.
-    2. otaclient_release: manifest.json and release packages.
+    2. update agent release package: its bundles.
     3. resource_table itself.
 
     NOTE(20251219): an example case is when the system image is dev build, and contains
@@ -127,13 +128,20 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
             if _sys_config_descriptor := _image_config.sys_config:
                 _res.add(_sys_config_descriptor.digest.digest)
             _res.add(_image_config.file_table.digest.digest)
-        elif isinstance(manifest_descriptor, OTAClientPackageManifest.Descriptor):
+        elif isinstance(
+            manifest_descriptor,
+            (
+                UpdateAgentPackageManifest.Descriptor,
+                OTAClientPackageManifest.Descriptor,
+            ),
+        ):
+            # the agent's bundles, under either manifest kind: an image from an older
+            # step of the pipeline still carries the otaclient one
             _manifest = manifest_descriptor.load_metafile_from_resource_dir(
                 _resource_dir
             )
-            _res.add(_manifest.config.digest.digest)
-            for _payload in _manifest.layers:
-                _res.add(_payload.digest.digest)
+            for _bundle in _manifest.layers:
+                _res.add(_bundle.digest.digest)
         elif isinstance(manifest_descriptor, PartitionImageManifest.Descriptor):
             # partition images are streamed onto partitions as they are: never
             #   bundled, compressed or sliced (spec: partition_image.md)

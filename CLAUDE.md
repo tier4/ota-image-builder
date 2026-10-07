@@ -15,7 +15,7 @@ The builder converts a system rootfs into an optimized OTA image (a **file-based
 - Signing the image index by ES256 JWT with X.509 certificate chains.
 - Packing into a reproducible ZIP artifact for distribution.
 
-It also adds **partition-based** payloads (`add-partition-image`, `cmds/add_partition_image.py`): whole partition images or a vendor package that the platform's tooling has already produced, described by a spec JSON, copied into the blob storage as they are (never bundled, compressed or sliced by `finalize`) and described by a `PartitionImageConfig`/`PartitionImageManifest` from `ota_image_libs.v1.partition_image`. An image holding only partition-based payloads has no resource_table; `finalize` then only counts the blobs. A partition entry may also carry a **delta** (`PartitionDeltaDescriptor`, media type `…partition-delta.v1`) that reconstructs its image from bytes the device already has; the spec names it with `"delta": {file, algorithm, source: {digest, size}}` and `"store_image": false` keeps the image's own bytes out of the payload. The image is still described — digest, size, verity — because that is what the agent verifies the reconstruction against.
+It also adds **partition-based** payloads (`add-partition-image`): whole partition images, data images, a firmware package or a vendor package that the platform's tooling produced, described by a spec JSON, stored zstd-compressed and optionally as block diffs against a previous build. `finalize` leaves these blobs as stored. The schemas are `ota_image_libs.v1.partition_image`, the delta codec `ota_image_tools.libs.block_diff`; the README describes the spec JSON.
 
 ## Commands for Dev
 
@@ -91,8 +91,10 @@ The builder provides the following subcommands (registered in `main.py`):
 | `build-annotation` | `build_annotation.py` | Build/merge annotation YAML files with key=value pairs |
 | `build-exclude-cfg` | `build_exclude_cfg.py` | Build exclusion glob pattern files |
 | `add-image` | `add_image.py` | Add system image to OTA image (core operation — processes rootfs, creates file_table, resource_table, manifests) |
-| `add-otaclient-package` | `add_otaclient_package.py` | Add OTAClient release package |
+| `add-partition-image` | `add_partition_image.py` | Add a partition-based payload from a spec JSON (composition in `v1/_partition_image.py`) |
+| `add-otaclient-package` | `add_otaclient_package.py` | Add an OTAClient release, as the OTAClient release package and as the update agent release package |
 | `add-otaclient-package-compat` | `add_otaclient_package_compat.py` | Legacy OTAClient compatibility |
+| `add-update-agent-package` | `add_update_agent_package.py` | Add update agent bundles (the agent that applies the image) |
 | `finalize` | `finalize.py` | Optimize blobs (bundle, compress, slice filters) and finalize image |
 | `sign` | `sign.py` | Sign finalized image with ES256 JWT |
 | `sign-with-aws-kms-prepare` | `aws_kms_sign.py` | Finalize signing state and emit the unsigned JWT + an AWS KMS `Sign` request template (JSON) for KMS-based signing |
@@ -110,6 +112,7 @@ Builder-side logic for composing OTA image v1 metadata and processing resources:
 | `_image_index.py` | Image index initialization with annotations |
 | `_image_manifest.py` | Image manifest composition per ECU payload |
 | `_image_config.py` | Image config composition with rootfs statistics |
+| `_partition_image.py` | Partition-based payload: the spec JSON, blob storage (compression, block diffs), config and manifest composition |
 | `_resource_process/` | Resource processing pipeline (see below) |
 
 ### Resource Processing Pipeline (`v1/_resource_process/`)

@@ -52,43 +52,87 @@ class TestAddOtaclientPackageCmd:
         )
 
         mocker.patch(
-            "ota_image_builder.cmds.add_otaclient_package.check_if_valid_ota_image",
+            "ota_image_builder.cmds.add_update_agent_package.check_if_valid_ota_image",
             return_value=True,
         )
         with pytest.raises(SystemExit):
             add_otaclient_package_cmd(args)
 
-    def test_success(self, tmp_path: Path, mocker: MockerFixture):
-        """Test successful adding of otaclient package."""
-        image_root = tmp_path / "ota_image"
-        image_root.mkdir()
-        release_dir = tmp_path / "release"
-        release_dir.mkdir()
-
-        args = Namespace(
-            image_root=str(image_root),
-            release_dir=str(release_dir),
-        )
-
+    @staticmethod
+    def _mock_image(mocker: MockerFixture, release_dir: Path):
         mocker.patch(
-            "ota_image_builder.cmds.add_otaclient_package.check_if_valid_ota_image",
+            "ota_image_builder.cmds.add_update_agent_package.check_if_valid_ota_image",
             return_value=True,
         )
         mock_helper_class = mocker.patch(
-            "ota_image_builder.cmds.add_otaclient_package.ImageIndexHelper"
+            "ota_image_builder.cmds.add_update_agent_package.ImageIndexHelper"
         )
         mock_helper = mocker.MagicMock()
         mock_helper.image_index.image_finalized = False
         mock_helper.image_index.image_signed = False
-        mock_helper.image_index.find_otaclient_package.return_value = None
+        mock_helper.image_index.find_update_agent_package.return_value = None
+        mock_helper.image_index.find_otaclient_package.return_value = []
         mock_helper_class.return_value = mock_helper
 
-        mock_add = mocker.patch(
+        mocker.patch(
+            "ota_image_builder.cmds.add_otaclient_package.bundles_from_otaclient_release",
+            return_value=[
+                (
+                    release_dir / "otaclient.squashfs",
+                    "tier4.otaclient.squashfs.v1",
+                    "3.14.0",
+                    "x86_64",
+                )
+            ],
+        )
+        return mock_helper
+
+    def test_both_the_otaclient_and_the_update_agent_entries_are_written(
+        self, tmp_path: Path, mocker: MockerFixture
+    ):
+        """otaclient up to v3.14 finds its release through the OTAClient release package
+        entry, later versions through the update agent one: one command writes both."""
+        image_root = tmp_path / "ota_image"
+        image_root.mkdir()
+        release_dir = tmp_path / "release"
+        release_dir.mkdir()
+        args = Namespace(image_root=str(image_root), release_dir=str(release_dir))
+
+        mock_helper = self._mock_image(mocker, release_dir)
+        mock_add_otaclient = mocker.patch(
             "ota_image_builder.cmds.add_otaclient_package.add_otaclient_package"
         )
-        mock_add.return_value = mocker.MagicMock()
+        mock_add_agent = mocker.patch(
+            "ota_image_builder.cmds.add_update_agent_package.add_update_agent_package"
+        )
 
         add_otaclient_package_cmd(args)
 
+        mock_add_otaclient.assert_called_once()
+        mock_helper.image_index.add_otaclient_package.assert_called_once_with(
+            mock_add_otaclient.return_value
+        )
+        mock_add_agent.assert_called_once()
+        mock_helper.image_index.add_update_agent_package.assert_called_once_with(
+            mock_add_agent.return_value
+        )
         mock_helper.sync_index.assert_called_once()
-        mock_add.assert_called_once()
+
+    def test_an_image_that_already_carries_the_otaclient_package_is_refused(
+        self, tmp_path: Path, mocker: MockerFixture
+    ):
+        image_root = tmp_path / "ota_image"
+        image_root.mkdir()
+        release_dir = tmp_path / "release"
+        release_dir.mkdir()
+        args = Namespace(image_root=str(image_root), release_dir=str(release_dir))
+
+        mock_helper = self._mock_image(mocker, release_dir)
+        mock_helper.image_index.find_otaclient_package.return_value = [
+            mocker.MagicMock()
+        ]
+
+        with pytest.raises(SystemExit):
+            add_otaclient_package_cmd(args)
+        mock_helper.image_index.add_otaclient_package.assert_not_called()
+        mock_helper.image_index.add_update_agent_package.assert_not_called()
