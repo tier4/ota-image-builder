@@ -7,13 +7,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `ota-image-builder` is a Python CLI tool that builds OTA update images from system rootfs images.
 It is based on `ota-image-libs`, following the [OTA image specification version 1](https://github.com/tier4/ota-image-libs/tree/main/spec).
 
-The builder converts a system rootfs into an optimized OTA image by:
+The builder converts a system rootfs into an optimized OTA image (a **file-based** payload) by:
 
 - Scanning the rootfs and registering all file entries and resources (blobs) into SQLite databases (file_table, resource_table).
 - Deduplicating resources by SHA256 content addressing into a flat blob storage (`blobs/sha256/`).
 - At image build finalizing, applying storage optimization filters: bundling small files, compressing blobs with zstd, slicing large files.
 - Signing the image index by ES256 JWT with X.509 certificate chains.
 - Packing into a reproducible ZIP artifact for distribution.
+
+It also adds **partition-based** payloads (`add-partition-image`): whole partition images, data images, a firmware package or a vendor package that the platform's tooling produced, described by a spec JSON, stored zstd-compressed and optionally as block diffs against a previous build. `finalize` leaves these blobs as stored. The schemas are `ota_image_libs.v1.partition_image`, the delta codec `ota_image_tools.libs.block_diff`; the README describes the spec JSON.
 
 ## Commands for Dev
 
@@ -89,8 +91,10 @@ The builder provides the following subcommands (registered in `main.py`):
 | `build-annotation` | `build_annotation.py` | Build/merge annotation YAML files with key=value pairs |
 | `build-exclude-cfg` | `build_exclude_cfg.py` | Build exclusion glob pattern files |
 | `add-image` | `add_image.py` | Add system image to OTA image (core operation — processes rootfs, creates file_table, resource_table, manifests) |
-| `add-otaclient-package` | `add_otaclient_package.py` | Add OTAClient release package |
+| `add-partition-image` | `add_partition_image.py` | Add a partition-based payload from a spec JSON (composition in `v1/_partition_image.py`) |
+| `add-otaclient-package` | `add_otaclient_package.py` | Add OTAClient release package (never the update agent release package: clients on ota-image-libs < 0.6.0 refuse an index with a manifest kind they do not know) |
 | `add-otaclient-package-compat` | `add_otaclient_package_compat.py` | Legacy OTAClient compatibility |
+| `add-update-agent-package` | `add_update_agent_package.py` | Add update agent bundles (the agent that applies the image) |
 | `finalize` | `finalize.py` | Optimize blobs (bundle, compress, slice filters) and finalize image |
 | `sign` | `sign.py` | Sign finalized image with ES256 JWT |
 | `sign-with-aws-kms-prepare` | `aws_kms_sign.py` | Finalize signing state and emit the unsigned JWT + an AWS KMS `Sign` request template (JSON) for KMS-based signing |
@@ -108,6 +112,7 @@ Builder-side logic for composing OTA image v1 metadata and processing resources:
 | `_image_index.py` | Image index initialization with annotations |
 | `_image_manifest.py` | Image manifest composition per ECU payload |
 | `_image_config.py` | Image config composition with rootfs statistics |
+| `_partition_image.py` | Partition-based payload: the spec JSON, blob storage (compression, block diffs), config and manifest composition |
 | `_resource_process/` | Resource processing pipeline (see below) |
 
 ### Resource Processing Pipeline (`v1/_resource_process/`)

@@ -84,6 +84,118 @@ ota-image-builder pack-artifact \
   ota_image/
 ```
 
+### Partition-based payloads
+
+For a device whose root is read-only and integrity-protected, the payload is not the files of a rootfs but whole partition images (see the [partition-based payload spec](https://github.com/tier4/ota-image-libs/blob/main/spec/partition_image.md)).
+The blobs -- a root filesystem image with its dm-verity hash tree, the boot files that carry the root hash, the data images -- and the spec JSON beside them come out of a rootfs tree with `prepare-partition-image` (and `build-data-images` first, for what rides beside the rootfs); `add-partition-image` takes over from there, in place of step 4:
+
+```bash
+# the data images the product's list declares, carved out of the tree
+ota-image-builder build-data-images --config data_images.yaml --rootfs-dir rootfs/ --out blobs/data/
+# the rootfs image with its hash tree, the boot files, spec.json (run as root: mkfs.ext4 -d keeps the tree's ownership)
+ota-image-builder prepare-partition-image --platform grub --rootfs-dir rootfs/ --version-file /etc/rootfs-version --out blobs/ --data-images blobs/data/
+#   --version-file: the file in the tree the device reports its version from (the platform installer writes it); or --version <v>
+#   --platform l4t: Image, initrd, the board DTB (--dtb) and a command line template; --installer-out <dir> also
+#   packs the two boot images a flash writes (ota-image-libs v0.7.0 or later: its bootimg packer); --firmware <capsule>
+#   --firmware-version <v> names the BSP capsule
+#   --vendor-package <pkg> --format <fmt> --version <v>: a package the platform's own updater applies, no tree, no --platform
+```
+
+Reproducible by construction: the filesystem UUID, the directory hash seed, the superblock times, the verity salt and UUID and the tar timestamps are fixed or derived from the version, never drawn, so two builds of one tree are one image. The tree's own inode times are in the image too (`mkfs.ext4 -d` copies atime, mtime and ctime), so a tree extracted again is a different tree (its ctime), and the first read of a freshly written file bumps its atime (relatime): when two builds of one tree must match, mount it `noatime` or read it once before the first. What the tree must carry -- the version in `/etc/esync-rootfs-version`, an initramfs that opens the verity root -- is the platform installer's job before this step.
+
+The list `build-data-images` reads is the product's own; nothing in the builder names an image:
+
+```yaml
+data_images:
+  - name: models                 # what a campaign addresses
+    mount: /opt/autoware/models  # where the device mounts it, and where the files are in the tree
+    version: xx1/2.6.1           # or version_file: a file in the tree whose first line is the version
+    source: /srv/models          # optional: take the files from here, not the mount
+    requires:                    # optional: half-open version ranges
+      rootfs: {min: "2.0.0"}
+    component: MODELS            # optional: the name the device reports this image's version under, when not the image name
+```
+
+Each entry becomes `<name>.img`, `.env` (what the device reads at boot) and `.spec.json`, and its files leave the tree.
+
+```bash
+ota-image-builder add-partition-image \
+  --annotations-file annotations.yaml \
+  --release-key dev \
+  --sys-config "ecu_id:sys_config.yaml" \
+  --spec /path/to/blobs/spec.json \
+  ota_image/
+```
+
+```json
+{
+  "delivery": "direct",
+  "version": "1.2.0",
+  "partitions": [
+    {"name": "rootfs", "action": "write", "image": "rootfs.img",
+     "filesystem": "ext4", "verity": {"root_hash": "…", "hash_offset": 1468006400}},
+    {"name": "boot",     "action": "write", "image": "boot.tar"},
+    {"name": "scratch",  "action": "mkfs"},
+    {"name": "identity", "action": "keep"},
+    {"name": "optdata",  "action": "keep"}
+  ]
+}
+```
+
+A written role named `boot` is the slot's boot files, a tar unpacked into the boot directory; every other written role is a partition image, written as it is.
+`"delivery": "vendor-package"` with `"package": {"file": "…", "format": "…"}` describes one opaque package the platform's own updater applies.
+Partition images, data images, firmware packages and the vendor package are stored **zstd-compressed** (`--zstd-level`, default 19 with long-range matching; `--no-compress` stores them as they are); the descriptor then names the stored bytes and its annotations what they decode to, and the agent decodes the blob on its way to the partition.
+`finalize` never bundles, compresses or slices these blobs and `pack-artifact` stores them as they are, so an agent streams a partition image straight from the artifact.
+The `sys_config` of such a payload is informational: its items are applied when the image is built.
+
+A partition may ship a **block diff** against a previous build instead of its image, so that a campaign transfers the change rather than the whole partition. The delta is built by `add-partition-image` from the previous build's image, named in the spec or on the command line, and the payload then carries the delta alone:
+
+```json
+{"name": "rootfs", "action": "write", "image": "rootfs.img",
+ "filesystem": "ext4", "verity": {"root_hash": "…", "hash_offset": 1468006400},
+ "delta": {"from": "../1.1.0/rootfs.img"}}
+```
+
+```bash
+ota-image-builder add-partition-image ... --delta-from rootfs=/releases/1.1.0/rootfs.img ota_image/
+```
+
+The image file is still named so that its digest, size and verity go into the payload: that is what the agent verifies the reconstruction against.
+The delta names the bytes it applies to by digest, because on the device those bytes are the committed slot's own partition and a digest identifies them exactly; the agent reads them where they lie, so a delta of any size needs no staging space. A device at another version needs a payload built for it.
+Measured on two builds of an 8.15 GiB rootfs image: 109 MB as a delta, 2.40 GB as a compressed image, 8.75 GB raw.
+
+#### Data images
+
+What changes on its own cadence -- a set of ML models, say -- rides beside the partitions as a **data image**: a read-only filesystem image with its verity hash tree appended, which the device keeps as a file outside the slots and mounts at a path. The spec lists them under `data_images`; the agent that applies the payload writes them, under either delivery:
+
+```json
+"data_images": [
+  {"name": "models", "version": "2026.9.1", "mount": "/opt/models",
+   "image": "models.img", "filesystem": "squashfs",
+   "verity": {"root_hash": "…", "hash_offset": 209715200},
+   "requires": {"rootfs": {"min": "1.2.0", "max": "2.0.0"}}}
+]
+```
+
+`requires` pins which rootfs (or other data image) versions the image goes with; the device refuses the rest. A data image is stored compressed and may ship as a block diff like a partition (`"delta": {"from": …}` or `--delta-from models=/releases/2026.8.0/models.img`, against the image the device holds; `--delta-from data:NAME=IMAGE` when a data image and a partition role share a name). A data image that did not change since that release ships as a delta from itself -- a few bytes saying so -- which is why the data image build is reproducible (fixed timestamps, derived UUIDs). The same spec also builds the payload that updates the data images **alone**:
+
+```bash
+ota-image-builder add-partition-image ... --data-only ota_image/
+```
+
+Every partition is then `keep` and no partition blob is stored, so a release spec yields both the rootfs release and the data-image-only campaign, and the two share the data image blob by digest.
+
+#### Firmware
+
+What boots before any partition image is read -- the bootloader chain and the firmware beside it -- is the platform's own updater's to write, from a package in its format. The spec names that package under `firmware`, so that it travels with the release, is verified with it and is judged by the same trial boot; the agent stages it where the platform's updater picks it up (a UEFI capsule on the EFI system partition, say) and the platform applies it on the reboot:
+
+```json
+"firmware": {"name": "firmware", "version": "2.0.0", "format": "<the platform updater's package format>",
+             "file": "firmware.pkg", "requires": {"rootfs": {"min": "2.2.0"}}}
+```
+
+`format` is opaque here; an agent applies the formats its platform takes and refuses the rest. Firmware is slotted with the boot chain where it is slotted at all, so on a platform whose rootfs slot follows the boot chain a firmware update is also a slot switch: the payload carries the slot roles too, if only as a block diff that copies the committed slot. `--data-only` drops it along with the partitions.
+
 ### Subcommands
 
 | Command | Description |
@@ -94,8 +206,10 @@ ota-image-builder pack-artifact \
 | `init` | Initialize an empty OTA image |
 | `build-annotation` | Build/merge annotation YAML files |
 | `build-exclude-cfg` | Build exclusion glob pattern files |
-| `add-image` | Add a system image payload to the OTA image |
+| `add-image` | Add a system image payload (file-based) to the OTA image |
+| `add-partition-image` | Add a partition-based payload: whole partition images or a vendor package, from a spec JSON |
 | `add-otaclient-package` | Add an OTAClient release package |
+| `add-update-agent-package` | Add an update agent's bundle(s) as the image's update agent release package (see the note below) |
 | `add-otaclient-package-compat` | Add an OTAClient package in legacy-compatible format |
 | `finalize` | Optimize blob storage and finalize the image |
 | `sign` | Sign the finalized image with ES256 JWT |
@@ -103,6 +217,8 @@ ota-image-builder pack-artifact \
 
 Use `-d`/`--debug` for debug logging.
 Run `ota-image-builder <command> --help` for detailed usage of each subcommand.
+
+**Compatibility note.** A consumer refuses an `index.json` that lists a manifest kind its ota-image-libs does not know, so an image must carry only entries every one of its consumers can read. The update agent release package (`add-update-agent-package`) is known from ota-image-libs 0.6.0 on: an image that otaclient releases before that (v3.14 and earlier) or other tools on an older library must read carries none, and `add-otaclient-package` therefore writes the OTAClient release package only. Partition-based payloads are read as file-based descriptors by older libraries and do not stop them from finding their own payload.
 
 ## Specification
 
