@@ -211,9 +211,11 @@ def _vendor(args: Namespace, out: Path) -> None:
 
 
 def _direct(args: Namespace, out: Path) -> None:
-    tree = Path(args.rootfs_dir)
+    # Resolved: a CI hands over its rsync'd export through a symlink, and `du` on a
+    # symlink measures the link, which sized the image at 68 MiB for a 1.6 GB tree.
+    tree = Path(args.rootfs_dir).resolve()
     if not tree.is_dir():
-        raise blobs.BlobBuildError(f"no such directory: {tree}")
+        raise blobs.BlobBuildError(f"no such directory: {args.rootfs_dir}")
     blobs.check_tree_ownership(tree)
     blobs.require_tools("mkfs.ext4", "veritysetup", "du")
     blobs.warn_if_not_root()

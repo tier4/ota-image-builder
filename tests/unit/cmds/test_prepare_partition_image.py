@@ -368,6 +368,20 @@ def test_a_data_images_directory_without_any_adds_none(
     assert "data_images" not in json.loads((tmp_path / "out" / "spec.json").read_text())
 
 
+def test_a_tree_reached_through_a_symlink_is_the_tree(tree, tmp_path, fake_veritysetup):
+    """A CI hands the exported rootfs over as a symlink; the image is sized and built
+    from what it points at, not from the link."""
+    link = tmp_path / "rootfs-link"
+    os.symlink(tree, link)
+    direct, linked = tmp_path / "direct", tmp_path / "linked"
+    build(tree, direct)
+    build(link, linked)
+    assert (linked / "rootfs.img").stat().st_size == (
+        direct / "rootfs.img"
+    ).stat().st_size
+    assert (linked / "rootfs.img").read_bytes() == (direct / "rootfs.img").read_bytes()
+
+
 def test_two_builds_of_one_tree_are_one_image(tree, tmp_path, fake_veritysetup):
     """The filesystem UUID, the superblock times and the directory hash seed are
     derived, not drawn. A different version is a different image."""
