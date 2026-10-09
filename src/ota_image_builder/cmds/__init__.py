@@ -22,10 +22,12 @@ from .aws_kms_sign import (
     sign_with_aws_kms_prepare_cmd_args,
 )
 from .build_annotation import build_annotation_cmd_args
+from .build_data_images import build_data_images_cmd_args
 from .build_exclude_cfg import build_exclude_cfg_cmd_args
 from .finalize import finalize_cmd_args
 from .init import init_cmd_args
 from .pack_artifact import pack_artifact_cmd_args
+from .prepare_partition_image import prepare_partition_image_cmd_args
 from .prepare_sysimg import prepare_sysimg_cmd_args
 from .sign import sign_cmd_args
 
@@ -43,5 +45,7 @@ __all__ = [
     "add_otaclient_package_compat_cmd_args",
     "add_update_agent_package_cmd_args",
     "prepare_sysimg_cmd_args",
+    "prepare_partition_image_cmd_args",
+    "build_data_images_cmd_args",
     "pack_artifact_cmd_args",
 ]

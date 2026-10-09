@@ -30,10 +30,12 @@ from ota_image_builder.cmds import (
     add_partition_image_cmd_args,
     add_update_agent_package_cmd_args,
     build_annotation_cmd_args,
+    build_data_images_cmd_args,
     build_exclude_cfg_cmd_args,
     finalize_cmd_args,
     init_cmd_args,
     pack_artifact_cmd_args,
+    prepare_partition_image_cmd_args,
     prepare_sysimg_cmd_args,
     sign_cmd_args,
     sign_with_aws_kms_finish_cmd_args,
@@ -100,6 +102,8 @@ def main():
     build_exclude_cfg_cmd_args(sub_arg_parser)
     build_annotation_cmd_args(sub_arg_parser)
     add_image_cmd_args(sub_arg_parser)
+    build_data_images_cmd_args(sub_arg_parser)
+    prepare_partition_image_cmd_args(sub_arg_parser)
     add_partition_image_cmd_args(sub_arg_parser)
     add_update_agent_package_cmd_args(sub_arg_parser)
     add_otaclient_package_cmd_args(sub_arg_parser)

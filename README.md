@@ -87,7 +87,36 @@ ota-image-builder pack-artifact \
 ### Partition-based payloads
 
 For a device whose root is read-only and integrity-protected, the payload is not the files of a rootfs but whole partition images (see the [partition-based payload spec](https://github.com/tier4/ota-image-libs/blob/main/spec/partition_image.md)).
-The platform's own tooling produces the blobs — a root filesystem image with its dm-verity hash tree, the boot files that carry the root hash — and a small spec JSON beside them; `add-partition-image` takes over from there, in place of step 4:
+The blobs -- a root filesystem image with its dm-verity hash tree, the boot files that carry the root hash, the data images -- and the spec JSON beside them come out of a rootfs tree with `prepare-partition-image` (and `build-data-images` first, for what rides beside the rootfs); `add-partition-image` takes over from there, in place of step 4:
+
+```bash
+# the data images the product's list declares, carved out of the tree
+ota-image-builder build-data-images --config data_images.yaml --rootfs-dir rootfs/ --out blobs/data/
+# the rootfs image with its hash tree, the boot files, spec.json (run as root: mkfs.ext4 -d keeps the tree's ownership)
+ota-image-builder prepare-partition-image --platform grub --rootfs-dir rootfs/ --version-file /etc/rootfs-version --out blobs/ --data-images blobs/data/
+#   --version-file: the file in the tree the device reports its version from (the platform installer writes it); or --version <v>
+#   --platform l4t: Image, initrd, the board DTB (--dtb) and a command line template; --installer-out <dir> also
+#   packs the two boot images a flash writes (ota-image-libs v0.7.0 or later: its bootimg packer); --firmware <capsule>
+#   --firmware-version <v> names the BSP capsule
+#   --vendor-package <pkg> --format <fmt> --version <v>: a package the platform's own updater applies, no tree, no --platform
+```
+
+Reproducible by construction: the filesystem UUID, the directory hash seed, the superblock times, the verity salt and UUID and the tar timestamps are fixed or derived from the version, never drawn, so two builds of one tree are one image. The tree's own inode times are in the image too (`mkfs.ext4 -d` copies atime, mtime and ctime), so a tree extracted again is a different tree (its ctime), and the first read of a freshly written file bumps its atime (relatime): when two builds of one tree must match, mount it `noatime` or read it once before the first. What the tree must carry -- the version in `/etc/esync-rootfs-version`, an initramfs that opens the verity root -- is the platform installer's job before this step.
+
+The list `build-data-images` reads is the product's own; nothing in the builder names an image:
+
+```yaml
+data_images:
+  - name: models                 # what a campaign addresses
+    mount: /opt/autoware/models  # where the device mounts it, and where the files are in the tree
+    version: xx1/2.6.1           # or version_file: a file in the tree whose first line is the version
+    source: /srv/models          # optional: take the files from here, not the mount
+    requires:                    # optional: half-open version ranges
+      rootfs: {min: "2.0.0"}
+    component: MODELS            # optional: the name the device reports this image's version under, when not the image name
+```
+
+Each entry becomes `<name>.img`, `.env` (what the device reads at boot) and `.spec.json`, and its files leave the tree.
 
 ```bash
 ota-image-builder add-partition-image \
