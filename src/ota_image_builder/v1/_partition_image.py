@@ -78,7 +78,12 @@ logger = logging.getLogger(__name__)
 BOOT_FILES_ROLE = "boot"
 """The written role whose blob is the slot's boot files tar, not a partition image."""
 
-DEFAULT_ZSTD_LEVEL = 19
+# Level 10. Measured on an 8.8 GB rootfs image with the 128 MiB window, 20 cores: level
+# 19 took 323 s for 2.19 GB, level 10 32 s for 2.37 GB (8 percent more, ten times
+# faster), level 8 21 s for 2.41 GB; on a 30 GiB image level 19 was 28 minutes of a
+# 38-minute build. The device decodes any level at the same speed. `--zstd-level 19`
+# is there for a release where every byte counts.
+DEFAULT_ZSTD_LEVEL = 10
 """On an 8.15 GiB rootfs image: 2.40 GB at 19 against 2.87 GB at 3, in six minutes
 against eleven seconds. Delta literals barely move with the level."""
 

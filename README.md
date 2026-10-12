@@ -144,7 +144,7 @@ ota-image-builder add-partition-image \
 
 A written role named `boot` is the slot's boot files, a tar unpacked into the boot directory; every other written role is a partition image, written as it is.
 `"delivery": "vendor-package"` with `"package": {"file": "…", "format": "…"}` describes one opaque package the platform's own updater applies.
-Partition images, data images, firmware packages and the vendor package are stored **zstd-compressed** (`--zstd-level`, default 19 with long-range matching; `--no-compress` stores them as they are); the descriptor then names the stored bytes and its annotations what they decode to, and the agent decodes the blob on its way to the partition.
+Partition images, data images, firmware packages and the vendor package are stored **zstd-compressed** (`--zstd-level`, default 10 with long-range matching, a 128 MiB window; 19 for a release where every byte counts, at several times the build time; `--no-compress` stores them as they are); the descriptor then names the stored bytes and its annotations what they decode to, and the agent decodes the blob on its way to the partition.
 `finalize` never bundles, compresses or slices these blobs and `pack-artifact` stores them as they are, so an agent streams a partition image straight from the artifact.
 The `sys_config` of such a payload is informational: its items are applied when the image is built.
 
@@ -162,7 +162,7 @@ ota-image-builder add-partition-image ... --delta-from rootfs=/releases/1.1.0/ro
 
 The image file is still named so that its digest, size and verity go into the payload: that is what the agent verifies the reconstruction against.
 The delta names the bytes it applies to by digest, because on the device those bytes are the committed slot's own partition and a digest identifies them exactly; the agent reads them where they lie, so a delta of any size needs no staging space. A device at another version needs a payload built for it.
-Measured on two builds of an 8.15 GiB rootfs image: 109 MB as a delta, 2.40 GB as a compressed image, 8.75 GB raw.
+Measured on two builds of an 8.15 GiB rootfs image: 109 MB as a delta, 2.40 GB as a compressed image (level 19), 8.75 GB raw. Compression levels on an 8.8 GB image, 20 cores: 19 takes 323 s for 2.19 GB, 10 takes 32 s for 2.37 GB, 8 takes 21 s for 2.41 GB; the default is 10.
 
 #### Data images
 
@@ -178,6 +178,8 @@ What changes on its own cadence -- a set of ML models, say -- rides beside the p
 ```
 
 `requires` pins which rootfs (or other data image) versions the image goes with; the device refuses the rest. A data image is stored compressed and may ship as a block diff like a partition (`"delta": {"from": …}` or `--delta-from models=/releases/2026.8.0/models.img`, against the image the device holds; `--delta-from data:NAME=IMAGE` when a data image and a partition role share a name). A data image that did not change since that release ships as a delta from itself -- a few bytes saying so -- which is why the data image build is reproducible (fixed timestamps, derived UUIDs). The same spec also builds the payload that updates the data images **alone**:
+
+The image keeps the tree's owners and modes, with every time fixed: what the software writes beside its data (a TensorRT engine next to its model) goes through the device's overlay as the user the tree names, and a root-owned image would refuse it.
 
 ```bash
 ota-image-builder add-partition-image ... --data-only ota_image/
