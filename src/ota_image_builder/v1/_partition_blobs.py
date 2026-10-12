@@ -315,9 +315,12 @@ def build_data_image(
     for p in outputs:
         p.unlink(missing_ok=True)
     try:
-        # Uncompressed, padded to 4 KiB, every entry root-owned with one fixed time, the
-        # root directory's mode fixed too, and no xattrs: the bytes depend on the files
-        # alone. A block diff then catches a changed file at its 4 KiB blocks.
+        # Uncompressed, padded to 4 KiB, one fixed time on every entry, the root
+        # directory's mode fixed too, and no xattrs: the bytes depend on the files alone,
+        # owners included. The tree's owners are kept: what the software writes beside
+        # its data (a TensorRT engine next to its model) goes through the device's
+        # overlay as the user the tree names, and a root-owned image would refuse it.
+        # A block diff then catches a changed file at its 4 KiB blocks.
         _run(
             [
                 "mksquashfs",
@@ -325,7 +328,6 @@ def build_data_image(
                 str(img),
                 "-noappend",
                 "-no-xattrs",
-                "-all-root",
                 "-root-mode",
                 "0755",
                 "-noI",

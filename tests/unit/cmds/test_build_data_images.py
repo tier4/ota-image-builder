@@ -34,7 +34,8 @@ HASH = "5f" * 32
 
 FAKE_MKSQUASHFS = """#!/bin/sh
 # <source> <image> [options]: the files as a tar, padded to whole 4 KiB blocks
-src="$1"; out="$2"
+src="$1"; out="$2"; shift 2
+printf '%s\n' "$@" > "$out.args"
 tar -C "$src" --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf "$out.tar" .
 size=$(stat -c %s "$out.tar"); pad=$(( (4096 - size % 4096) % 4096 ))
 { cat "$out.tar"; head -c "$pad" /dev/zero; } > "$out"
@@ -154,6 +155,18 @@ def test_every_listed_image_is_built_and_its_files_leave_the_tree(
     assert (tree / "opt/autoware/maps").is_dir(), "the mount point stays for the device"
     assert "built 2 data image(s)" in caplog.text
     assert "--data-images" in caplog.text, "says what consumes the directory next"
+
+
+def test_the_image_keeps_the_trees_owners_and_fixes_its_times(tmp_path, fake_tools):
+    """What the software writes beside its data goes through the device's overlay as
+    the user the tree names; forcing root would make the image refuse it. The times
+    are fixed so that the bytes depend on the files alone."""
+    tree = make_tree(tmp_path)
+    out = tmp_path / "out"
+    build(tree, out, CONFIG)
+    args = (out / "ml_package.img.args").read_text().split("\n")
+    assert "-all-root" not in args
+    assert "-all-time" in args and "-mkfs-time" in args and "-no-xattrs" in args
 
 
 def test_a_version_override_wins_over_the_list(tmp_path, fake_tools):
