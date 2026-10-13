@@ -24,4 +24,13 @@ ARG BUILDER_INSTALLATION="/ota-image-builder"
 
 COPY --from=app_build /build/dist/ota-image-builder ${BUILDER_INSTALLATION}
 
+# prepare-partition-image and build-data-images run the platforms' own tools:
+# mkfs.ext4 (e2fsprogs), veritysetup (cryptsetup-bin), mksquashfs (squashfs-tools).
+RUN set -eux; \
+    export DEBIAN_FRONTEND=noninteractive; \
+    apt-get update -qq; \
+    apt-get install --no-install-recommends -y e2fsprogs cryptsetup-bin squashfs-tools; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
 ENTRYPOINT [ "/ota-image-builder/ota-image-builder" ]

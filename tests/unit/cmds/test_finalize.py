@@ -39,6 +39,36 @@ class TestCollectProtectedResourcesDigest:
         assert isinstance(result, set)
         assert len(result) == 0
 
+    def test_the_bundles_of_either_agent_manifest_kind_are_protected(self, mocker):
+        """An update agent release package and an OTAClient release package both hold
+        bundles that must never be bundled, compressed or sliced; a pipeline with an
+        older step still writes the latter."""
+        from ota_image_libs.v1.otaclient_package.schema import OTAClientPackageManifest
+        from ota_image_libs.v1.update_agent_package.schema import (
+            UpdateAgentPackageManifest,
+        )
+
+        def manifest_descriptor(kind, bundle_digest: bytes, own_digest: bytes):
+            d = mocker.MagicMock()
+            d.__class__ = kind.Descriptor  # what the isinstance dispatch looks at
+            d.digest.digest = own_digest
+            bundle = mocker.MagicMock()
+            bundle.digest.digest = bundle_digest
+            d.load_metafile_from_resource_dir.return_value.layers = [bundle]
+            return d
+
+        mock_helper = mocker.MagicMock()
+        mock_helper.image_index.manifests = [
+            manifest_descriptor(
+                UpdateAgentPackageManifest, b"ua-bundle", b"ua-manifest"
+            ),
+            manifest_descriptor(OTAClientPackageManifest, b"oc-bundle", b"oc-manifest"),
+        ]
+
+        result = _collect_protected_resources_digest(mock_helper)
+
+        assert result == {b"ua-bundle", b"ua-manifest", b"oc-bundle", b"oc-manifest"}
+
 
 class TestFinalizeCmd:
     """Tests for finalize_cmd function."""
