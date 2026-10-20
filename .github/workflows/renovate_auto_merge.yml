@@ -10,9 +10,7 @@ on:
       - synchronize
       - ready_for_review
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   enable-auto-merge:
@@ -20,6 +18,9 @@ jobs:
       github.actor == 'renovate[bot]' &&
       contains(github.head_ref, 'github-actions-updates')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     timeout-minutes: 1
     steps:
       - name: Enable auto-merge
