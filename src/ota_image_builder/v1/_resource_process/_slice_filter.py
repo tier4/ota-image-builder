@@ -190,7 +190,8 @@ class SliceFilterProcesser:
 
     def _update_db(self, sliced: SliceResult) -> None:
         with self._db_helper.get_orm() as rs_orm:
-            for batch in batched(sliced, self._update_batch, strict=False):
+            # no strict=: Python 3.12, which this package supports, does not take it
+            for batch in batched(sliced, self._update_batch):  # noqa: B911
                 _update_one_batch(rs_orm, batch)
 
     def _process_slicing(self) -> tuple[int, Size, SliceResult]:

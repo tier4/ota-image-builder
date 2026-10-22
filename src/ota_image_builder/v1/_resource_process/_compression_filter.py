@@ -226,7 +226,8 @@ class CompressionFilterProcesser:
 
             # batch queries to select compressed entries from db
             compressed_entries: dict[Sha256DigestBytes, ResourceID] = {}
-            for _batch in batched(compressed.values(), SELECT_BATCH_SIZE, strict=False):
+            # no strict=: Python 3.12, which this package supports, does not take it
+            for _batch in batched(compressed.values(), SELECT_BATCH_SIZE):  # noqa: B911
                 _params_holder = ",".join(itertools.repeat("?", len(_batch)))
                 # fmt: off
                 _query_res = rs_orm.orm_execute(
