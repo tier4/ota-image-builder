@@ -34,7 +34,6 @@ External tools, as the platforms ship them: mkfs.ext4 (e2fsprogs), veritysetup
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import logging
 import os
@@ -149,14 +148,58 @@ def warn_if_not_root() -> None:
 
 # ------ the tree ------ #
 
+MAX_SYMLINKS = 40
+"""Symlinks followed while resolving one path in the tree, as the kernel's limit."""
+
+
+def resolve_in_tree(tree: Path, path: str | Path) -> Path:
+    """`path`, as the device sees it, resolved in the tree the way the device would:
+    every symlink is followed with the tree as `/`, and `..` stops at the tree's root.
+    The result is always under `tree` -- a symlink in the tree never names a file of
+    the machine that builds the image."""
+    root = tree.resolve()
+    parts = list(Path(str(path).lstrip("/")).parts)
+    cur = root
+    links = 0
+    while parts:
+        part = parts.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            cur = cur.parent if cur != root else root
+            continue
+        nxt = cur / part
+        if nxt.is_symlink():
+            links += 1
+            if links > MAX_SYMLINKS:
+                raise BlobBuildError(
+                    f"too many levels of symlinks resolving {path} in the tree"
+                )
+            target = os.readlink(nxt)
+            if target.startswith("/"):
+                cur = root
+            parts = list(Path(target.lstrip("/")).parts) + parts
+            continue
+        cur = nxt
+    return cur
+
+
+def tree_file(tree: Path, path: str | Path) -> Path | None:
+    """`path` in the tree (see resolve_in_tree) when it is a regular file, else None."""
+    p = resolve_in_tree(tree, path)
+    try:
+        return p if stat.S_ISREG(p.lstat().st_mode) else None
+    except FileNotFoundError:
+        return None
+
 
 def check_tree_ownership(tree: Path) -> None:
     """A tree unpacked without root is owned by whoever unpacked it and has no setuid
     bits; mkfs.ext4 -d copies that as it finds it, and the image boots with no working
     sudo (seen on a device). The tree's sudo is the tell."""
     for rel in ("usr/bin/sudo", "usr/bin/su", "bin/su"):
-        p = tree / rel
-        if not p.is_file():
+        p = tree_file(tree, rel)
+        if p is None:
             continue
         st = p.stat()
         if st.st_uid != 0 or not st.st_mode & stat.S_ISUID:
@@ -175,8 +218,8 @@ def read_version(
     must agree with it when both are given, and one of the two is required."""
     baked = ""
     if version_file:
-        path = tree / version_file.lstrip("/")
-        if not path.is_file():
+        path = tree_file(tree, version_file)
+        if path is None:
             raise BlobBuildError(f"--version-file {version_file} is not in the tree")
         baked = "".join(path.read_text().split())
         if not baked:
@@ -513,51 +556,44 @@ def check_l4t_cmdline_fits(cmdline: str, cmdline_extra: str) -> None:
         ),
         key=lambda pr: len(pr[1].encode()),
     )
-    try:
-        bootimg.check_cmdline(resolved)
-    except bootimg.BootImageError as e:
-        composed = len(resolved.encode()) - (
-            len(cmdline_extra) + 1 if cmdline_extra else 0
-        )
+    encoded = len(resolved.encode())
+    if encoded >= bootimg.CMDLINE_LEN:
+        composed = encoded - (len(cmdline_extra) + 1 if cmdline_extra else 0)
         raise BlobBuildError(
-            f"{e}: on {part} the composed arguments take {composed} bytes, leaving "
+            f"the kernel command line is {encoded} bytes and the boot image holds "
+            f"{bootimg.CMDLINE_LEN - 1}; a truncated one would boot the wrong root: on "
+            f"{part} the composed arguments take {composed} bytes, leaving "
             f"{max(bootimg.CMDLINE_LEN - 2 - composed, 0)} for --cmdline "
             f"({len(cmdline_extra)} given)"
-        ) from e
-
-
-def _resolve_in_boot(tree: Path, p: Path) -> Path | None:
-    """A path or symlink under <tree>/boot, resolved inside the tree."""
-    if p.is_symlink():
-        target = os.readlink(p)
-        p = tree / target.lstrip("/") if target.startswith("/") else p.parent / target
-    return p if p.is_file() else None
+        )
 
 
 def find_grub_kernel(
     tree: Path, kernel: str | None, initrd: str | None
 ) -> tuple[Path, Path]:
     """<tree>/boot/vmlinuz and initrd.img, else the newest vmlinuz-* and its initrd."""
-    k = Path(kernel) if kernel else _resolve_in_boot(tree, tree / "boot" / "vmlinuz")
+    k = Path(kernel) if kernel else tree_file(tree, "/boot/vmlinuz")
+    boot = resolve_in_tree(tree, "/boot")
     if k is None:
         found = sorted(
-            (tree / "boot").glob("vmlinuz-*") if (tree / "boot").is_dir() else [],
-            key=lambda p: _version_key(p.name),
+            (tree_file(tree, f"/boot/{p.name}") for p in boot.glob("vmlinuz-*"))
+            if boot.is_dir()
+            else [],
+            key=lambda p: _version_key(p.name) if p else [],
         )
-        found = [p for p in found if p.is_file()]
+        found = [p for p in found if p is not None]
         k = found[-1] if found else None
     if k is None or not k.is_file():
         raise BlobBuildError(f"no kernel found under {tree / 'boot'}; pass --kernel")
-    i = Path(initrd) if initrd else _resolve_in_boot(tree, tree / "boot" / "initrd.img")
+    i = Path(initrd) if initrd else tree_file(tree, "/boot/initrd.img")
     if i is None and k.name.startswith("vmlinuz-"):
-        candidate = tree / "boot" / f"initrd.img-{k.name[len('vmlinuz-') :]}"
-        i = candidate if candidate.is_file() else None
+        i = tree_file(tree, f"/boot/initrd.img-{k.name[len('vmlinuz-') :]}")
     if i is None or not i.is_file():
         raise BlobBuildError(
             f"no initramfs found to match {k} under {tree / 'boot'}; pass --initrd"
         )
-    hook = tree / "etc" / "initramfs-tools" / "hooks" / "ota-verity"
-    if not (hook.is_file() and "ota-functions" in hook.read_text(errors="replace")):
+    hook = tree_file(tree, "/etc/initramfs-tools/hooks/ota-verity")
+    if not (hook and "ota-functions" in hook.read_text(errors="replace")):
         logger.warning(
             f"the tree has no ota-verity initramfs hook; unless {i} was built with it, "
             "the kernel cannot open /dev/mapper/vroot"
@@ -614,24 +650,34 @@ def find_l4t_dtb(tree: Path, dtb: str | None) -> Path:
         p = Path(dtb)
     else:
         p = None
-        extlinux = tree / "boot" / "extlinux" / "extlinux.conf"
-        if extlinux.is_file():
+        extlinux = tree_file(tree, "/boot/extlinux/extlinux.conf")
+        if extlinux:
             m = re.search(
                 r"^\s*FDT\s+(\S+)", extlinux.read_text(errors="replace"), re.M
             )
             if m:
-                p = tree / m.group(1).lstrip("/")
+                p = tree_file(tree, m.group(1)) or tree / m.group(1).lstrip("/")
         if p is None:
-            kernel_dtbs = (
-                sorted((tree / "boot" / "dtb").glob("*.dtb"))
-                if (tree / "boot" / "dtb").is_dir()
-                else []
+            dtb_dir, boot = (
+                resolve_in_tree(tree, "/boot/dtb"),
+                resolve_in_tree(tree, "/boot"),
             )
-            found = (
-                sorted((tree / "boot").glob("tegra*.dtb"))
-                if (tree / "boot").is_dir()
-                else []
-            )
+            kernel_dtbs = [
+                f
+                for f in (
+                    tree_file(tree, f"/boot/dtb/{d.name}")
+                    for d in (sorted(dtb_dir.glob("*.dtb")) if dtb_dir.is_dir() else [])
+                )
+                if f is not None
+            ]
+            found = [
+                f
+                for f in (
+                    tree_file(tree, f"/boot/{d.name}")
+                    for d in (sorted(boot.glob("tegra*.dtb")) if boot.is_dir() else [])
+                )
+                if f is not None
+            ]
             if len(kernel_dtbs) == 1:
                 found = kernel_dtbs
             if len(found) != 1:
@@ -802,6 +848,10 @@ def add_data_images(out: Path, data_dir: Path) -> int:
     for entry_path in sorted(data_dir.glob("*.spec.json")):
         prefix = entry_path.with_name(entry_path.name[: -len(".spec.json")])
         img = Path(f"{prefix}.img")
+        if entry_path.is_symlink() or img.is_symlink():
+            raise BlobBuildError(
+                f"--data-images: {prefix}.* is a symlink; the directory holds the files themselves"
+            )
         if not img.is_file():
             raise BlobBuildError(
                 f"--data-images: no {img} beside {entry_path} (build-data-images writes them)"
@@ -839,80 +889,3 @@ def add_firmware(out: Path, name: str, version: str, fmt: str, file: Path) -> No
     logger.info(
         f"spec.json: firmware {name} {version} ({fmt}, {file.name}, {file.stat().st_size} bytes)"
     )
-
-
-# ------ the agent the tree carries ------ #
-
-PARTITION_AGENT_BUNDLE = "usr/local/lib/rootfs-ua/rootfs-ua-dpi"
-"""Where the platform installer puts the partition agent's bundle in the tree (the
-agent's `ROOTFS_UA_IMAGE_BUNDLE`): its entry point `rootfs-ua-dpi` and `AGENT_VERSION`
-beside it. The image's copy of the agent, which an image may also ship for a device
-running an older one to install and hand over to."""
-PARTITION_AGENT_ENTRYPOINT = "rootfs-ua-dpi"
-PARTITION_AGENT_VERSION_FILE = "AGENT_VERSION"
-ELF_MACHINES = {62: "x86_64", 183: "arm64"}
-"""e_machine -> the architecture name an update agent bundle is annotated with."""
-
-
-def _elf_architecture(exe: Path) -> str:
-    header = exe.read_bytes()[:20]
-    if len(header) < 20 or header[:4] != b"\x7fELF":
-        raise BlobBuildError(
-            f"{exe} is not an ELF executable: its architecture is unknown"
-        )
-    machine = int.from_bytes(header[18:20], "little" if header[5] == 1 else "big")
-    if machine not in ELF_MACHINES:
-        raise BlobBuildError(
-            f"{exe} is for ELF machine {machine}, which no agent bundle names"
-        )
-    return ELF_MACHINES[machine]
-
-
-def agent_bundle_from_tree(tree: Path, out_dir: Path) -> tuple[Path, str, str] | None:
-    """The tree's agent bundle as a .tar.gz in `out_dir`, with its version and
-    architecture; None for a tree that carries none. The tar holds the bundle
-    directory as it is (modes, symlinks), owned by root with fixed times, gzip
-    without a timestamp: one bundle, one blob."""
-    bundle = tree.resolve() / PARTITION_AGENT_BUNDLE
-    if not bundle.is_dir():
-        return None
-    entry = bundle / PARTITION_AGENT_ENTRYPOINT
-    if not entry.is_file():
-        raise BlobBuildError(
-            f"{bundle} has no {PARTITION_AGENT_ENTRYPOINT}: not an agent bundle"
-        )
-    version_file = bundle / PARTITION_AGENT_VERSION_FILE
-    version = version_file.read_text().strip() if version_file.is_file() else ""
-    if not NAME_RE.match(version):
-        raise BlobBuildError(
-            f"{version_file} holds {version!r}: an agent bundle names its version there"
-        )
-    arch = _elf_architecture(entry)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"rootfs-ua-dpi-{version}-{arch}.tar.gz"
-    with out.open("wb") as raw:
-        with gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as gz:
-            with tarfile.open(fileobj=gz, mode="w", format=tarfile.GNU_FORMAT) as tar:
-                paths = [bundle, *sorted(bundle.rglob("*"))]
-                for path in paths:
-                    arcname = PARTITION_AGENT_ENTRYPOINT
-                    if path != bundle:
-                        arcname += "/" + path.relative_to(bundle).as_posix()
-                    info = tar.gettarinfo(str(path), arcname)
-                    info.uid = info.gid = 0
-                    info.uname = info.gname = ""
-                    info.mtime = TAR_MTIME
-                    if info.islnk():
-                        # a second name for a file already in the tar: the agent
-                        # unpacks files, directories and symlinks only
-                        info.type, info.linkname = tarfile.REGTYPE, ""
-                        info.size = path.stat().st_size
-                    if info.isfile():
-                        with path.open("rb") as f:
-                            tar.addfile(info, f)
-                    else:
-                        tar.addfile(info)
-    logger.info(
-        f"agent bundle {version} ({arch}) from {bundle}: {out.stat().st_size} bytes"
-    )
-    return out, version, arch

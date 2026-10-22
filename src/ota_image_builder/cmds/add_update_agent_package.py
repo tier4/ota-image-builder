@@ -17,18 +17,15 @@ one entry of bundles (see ota_image_libs.v1.update_agent_package)."""
 from __future__ import annotations
 
 import logging
-import tempfile
 from argparse import Namespace
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ota_image_libs.v1.image_index.utils import ImageIndexHelper
-from ota_image_libs.v1.media_types import UPDATE_AGENT_TYPE_PARTITION_AGENT
 from ota_image_libs.v1.update_agent_package.utils import add_update_agent_package
 
 from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
-from ota_image_builder.v1 import _partition_blobs as blobs
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser, _SubParsersAction
@@ -50,25 +47,11 @@ def add_update_agent_package_cmd_args(
     parser.add_argument(
         "--bundle",
         action="append",
-        default=[],
+        required=True,
         metavar="FILE:TYPE:VERSION[:ARCH]",
         help=(
             "One agent bundle. TYPE is what the image calls it and is opaque: a "
             "consumer takes only a type it implements. Repeat for several."
-        ),
-    )
-    parser.add_argument(
-        "--rootfs-dir",
-        action="append",
-        default=[],
-        metavar="DIR",
-        help=(
-            "A partition-based payload's rootfs tree: the partition agent the platform "
-            f"installer put in it (/{blobs.PARTITION_AGENT_BUNDLE}) is shipped as "
-            f"{UPDATE_AGENT_TYPE_PARTITION_AGENT!r}, its version from "
-            f"{blobs.PARTITION_AGENT_VERSION_FILE} and its architecture from its entry "
-            "point. A tree without one adds nothing; trees with nothing between them "
-            "leave the image as it is. Repeat for several."
         ),
     )
     parser.add_argument("image_root", help="The folder of the OTA image.")
@@ -126,47 +109,8 @@ def add_bundles(
     )
 
 
-def _bundles_from_trees(
-    trees: Sequence[str], out_dir: Path
-) -> list[tuple[Path, str, str, str | None]]:
-    """The partition agents the trees carry, one per architecture: two trees of one
-    architecture shipping different versions cannot both be the image's agent."""
-    by_arch: dict[str, tuple[Path, str, str, str | None]] = {}
-    for n, tree in enumerate(trees):
-        try:
-            found = blobs.agent_bundle_from_tree(Path(tree), out_dir / str(n))
-        except blobs.BlobBuildError as e:
-            exit_with_err_msg(str(e))
-        if found is None:
-            logger.info(f"{tree} carries no partition agent bundle")
-            continue
-        _file, _version, _arch = found
-        seen = by_arch.get(_arch)
-        if seen is not None and seen[2] != _version:
-            exit_with_err_msg(
-                f"the trees carry two {_arch} agents, {seen[2]} and {_version}: an image "
-                "ships one per architecture"
-            )
-        by_arch.setdefault(
-            _arch, (_file, UPDATE_AGENT_TYPE_PARTITION_AGENT, _version, _arch)
-        )
-    return list(by_arch.values())
-
-
 def add_update_agent_package_cmd(args: Namespace) -> None:
     logger.debug(f"calling {add_update_agent_package_cmd.__name__} with {args}")
-    if not args.bundle and not args.rootfs_dir:
-        exit_with_err_msg(
-            "pass --bundle, or --rootfs-dir to take the agent from a tree"
-        )
     index_helper = open_image_for_agent_package(Path(args.image_root))
-    bundles = [_parse_bundle(_b) for _b in args.bundle]
-    with tempfile.TemporaryDirectory(prefix="agent-bundles-") as tmp:
-        bundles += _bundles_from_trees(args.rootfs_dir, Path(tmp))
-        if not bundles:
-            logger.info(
-                "no agent bundle to ship: the image carries no update agent package"
-            )
-            return
-        add_bundles(index_helper, bundles)
+    add_bundles(index_helper, [_parse_bundle(_b) for _b in args.bundle])
     index_helper.sync_index()

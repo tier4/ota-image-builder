@@ -202,7 +202,7 @@ def check_list(
 
 def _build_one(entry: dict[str, Any], tree: Path, rootfs_dir: str, out: Path) -> None:
     name, source = entry["name"], entry["source"]
-    src = Path(f"{tree}{source}")
+    src = blobs.resolve_in_tree(tree, source)
     if not src.is_dir():
         exit_with_err_msg(
             f"data image {name}: {source} is not a directory in {rootfs_dir} "
@@ -212,8 +212,8 @@ def _build_one(entry: dict[str, Any], tree: Path, rootfs_dir: str, out: Path) ->
         exit_with_err_msg(f"data image {name}: {source} is empty in {rootfs_dir}")
     version = entry["version"]
     if not version:
-        vf = Path(f"{tree}{entry['version_file']}")
-        if not vf.is_file():
+        vf = blobs.tree_file(tree, entry["version_file"])
+        if vf is None:
             exit_with_err_msg(
                 f"data image {name}: version_file {entry['version_file']} is not in {rootfs_dir}"
             )
@@ -241,7 +241,7 @@ def _build_one(entry: dict[str, Any], tree: Path, rootfs_dir: str, out: Path) ->
         exit_with_err_msg(
             f"data image {name}: could not remove the files under {src} from the tree: {e}"
         )
-    Path(f"{tree}{entry['mount']}").mkdir(parents=True, exist_ok=True)
+    blobs.resolve_in_tree(tree, entry["mount"]).mkdir(parents=True, exist_ok=True)
 
 
 def build_data_images_cmd(args: Namespace) -> None:

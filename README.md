@@ -101,9 +101,9 @@ ota-image-builder prepare-partition-image --platform grub --rootfs-dir rootfs/ -
 #   --vendor-package <pkg> --format <fmt> --version <v>: a package the platform's own updater applies, no tree, no --platform
 ```
 
-`--cmdline` is appended to the arguments the tool composes for the verity root, as it is, into `grub.cfg`'s `linux` line or the L4T boot image: it is one line of arguments made of letters, digits and `._,:=/+@-`, and none of `root`, `rootfstype`, `ro`, `rw`, `verity`, `verityinfo`, `rw_overlay`, `panic`, `init` or `rdinit`. On L4T the whole line, filled in for either slot, must fit the boot image's 511 bytes; the board's own arguments take most of them, and a line that does not fit is refused before the image is built.
+Every file this step reads from the tree (the version file, the kernel, the initramfs, the DTB) is resolved inside the tree, its symlinks followed with the tree as `/`: a symlink in the tree never names a file of the machine building the image. `--cmdline` is appended to the arguments the tool composes for the verity root, as it is, into `grub.cfg`'s `linux` line or the L4T boot image: it is one line of arguments made of letters, digits and `._,:=/+@-`, and none of `root`, `rootfstype`, `ro`, `rw`, `verity`, `verityinfo`, `rw_overlay`, `panic`, `init` or `rdinit`. On L4T the whole line, filled in for either slot, must fit the boot image's 511 bytes; the board's own arguments take most of them, and a line that does not fit is refused before the image is built.
 
-Reproducible by construction: the filesystem UUID, the directory hash seed, the superblock times, the verity salt and UUID and the tar timestamps are fixed or derived from the version, never drawn, so two builds of one tree are one image. The tree's own inode times are in the image too (`mkfs.ext4 -d` copies atime, mtime and ctime), so a tree extracted again is a different tree (its ctime), and the first read of a freshly written file bumps its atime (relatime): when two builds of one tree must match, mount it `noatime` or read it once before the first. What the tree must carry -- the version in `/etc/esync-rootfs-version`, an initramfs that opens the verity root -- is the platform installer's job before this step.
+Reproducible by construction: the filesystem UUID, the directory hash seed, the superblock times, the verity salt and UUID and the tar timestamps are fixed or derived from the version, never drawn, so two builds of one tree are one image. The tree's own inode times are in the image too (`mkfs.ext4 -d` copies atime, mtime and ctime), so a tree extracted again is a different tree (its ctime), and the first read of a freshly written file bumps its atime (relatime): when two builds of one tree must match, mount it `noatime` or read it once before the first. What the tree must carry -- the version file the device reports from, an initramfs that opens the verity root -- is the platform installer's job before this step.
 
 The list `build-data-images` reads is the product's own; nothing in the builder names an image:
 
@@ -213,7 +213,7 @@ What boots before any partition image is read -- the bootloader chain and the fi
 | `add-image` | Add a system image payload (file-based) to the OTA image |
 | `add-partition-image` | Add a partition-based payload: whole partition images or a vendor package, from a spec JSON |
 | `add-otaclient-package` | Add an OTAClient release package |
-| `add-update-agent-package` | Add an update agent's bundle(s) as the image's update agent release package (see the note below); `--rootfs-dir` takes the partition agent a payload's tree carries |
+| `add-update-agent-package` | Add an update agent's bundle(s) as the image's update agent release package (see the note below) |
 | `add-otaclient-package-compat` | Add an OTAClient package in legacy-compatible format |
 | `finalize` | Optimize blob storage and finalize the image |
 | `sign` | Sign the finalized image with ES256 JWT |

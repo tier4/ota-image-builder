@@ -136,7 +136,7 @@ def test_every_listed_image_is_built_and_its_files_leave_the_tree(
         "read from version_file before the files went"
     )
     assert "MOUNT='/opt/autoware/mlmodels'" in ml_env
-    assert "COMPONENT='T4-ML-PACKAGE'" in ml_env, "the eSync name the campaign uses"
+    assert "COMPONENT='T4-ML-PACKAGE'" in ml_env, "the name the campaign uses"
     assert "COMPONENT=" not in (out / "maps.env").read_text(), (
         "named like the image: none"
     )

@@ -441,21 +441,17 @@ def test_the_board_dtb_is_the_one_l4t_keeps_in_boot_dtb(
 ):
     """A BSP's /boot carries every board variant's DTB and install-platform.sh removes
     extlinux.conf: the one this board boots is L4T's /boot/dtb/kernel_<board>.dtb."""
-    for variant in ("AGX201", "AGX202", "AGX901"):
-        (l4t_tree / "boot" / f"tegra234-orin-agx-cti-{variant}.dtb").write_bytes(
-            variant.encode()
-        )
+    for variant in ("board-a", "board-b", "board-c"):
+        (l4t_tree / "boot" / f"tegra234-{variant}.dtb").write_bytes(variant.encode())
     out = refused(
         capsys, "--platform", "l4t", "--rootfs-dir", str(l4t_tree), "--out",
         str(tmp_path / "out"), "--version-file", VERSION_FILE,
     )  # fmt: skip
     assert "expected one DTB" in out and "found 0 and 4" in out
     (l4t_tree / "boot" / "dtb").mkdir()
-    (l4t_tree / "boot" / "dtb" / "kernel_tegra234-orin-agx-cti-AGX201.dtb").write_bytes(
-        b"AGX201"
-    )
+    (l4t_tree / "boot" / "dtb" / "kernel_tegra234-board-a.dtb").write_bytes(b"board-a")
     build(l4t_tree, tmp_path / "out", platform="l4t")
-    assert boot_blob(tmp_path / "out")["board.dtb"] == b"AGX201"
+    assert boot_blob(tmp_path / "out")["board.dtb"] == b"board-a"
 
 
 def test_the_firmware_capsule_is_linked_and_named_in_the_spec(
@@ -616,3 +612,66 @@ def test_a_vendor_package_spec(tmp_path, capsys):
     assert "--platform is required" in refused(
         capsys, "--rootfs-dir", str(tmp_path), "--version", "1.0.0", "--out", str(out)
     )
+
+
+# ------ paths in the tree ------ #
+
+
+def test_a_path_in_the_tree_resolves_inside_it(tmp_path):
+    """Symlinks are followed with the tree as `/`, and `..` stops at its root: the
+    result is under the tree whatever the links say."""
+    tree = tmp_path / "tree"
+    (tree / "boot").mkdir(parents=True)
+    (tree / "boot" / "vmlinuz-1").write_bytes(b"K")
+    os.symlink("/boot/vmlinuz-1", tree / "boot" / "vmlinuz")  # absolute, in the tree
+    os.symlink("../../../../boot", tree / "up")  # climbs past the root
+    os.symlink("loop", tree / "loop")
+    root = tree.resolve()
+    assert blobs.resolve_in_tree(tree, "/boot/vmlinuz") == root / "boot" / "vmlinuz-1"
+    assert blobs.resolve_in_tree(tree, "/up/vmlinuz-1") == root / "boot" / "vmlinuz-1"
+    assert blobs.resolve_in_tree(tree, "/../../boot") == root / "boot"
+    with pytest.raises(blobs.BlobBuildError, match="too many levels of symlinks"):
+        blobs.resolve_in_tree(tree, "/loop")
+
+
+def test_a_symlink_leading_out_of_the_tree_names_a_file_in_it(tmp_path):
+    """What a link names outside the tree is looked up inside it: there it is missing,
+    or a directory, and the build refuses it as it would any missing file."""
+    tree = tmp_path / "tree"
+    (tree / "etc").mkdir(parents=True)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("1.0.0\n")
+    os.symlink(str(outside), tree / "etc" / "rootfs-version")
+    assert blobs.tree_file(tree, "/etc/rootfs-version") is None
+    os.symlink("/proc/self/status", tree / "etc" / "status")
+    assert blobs.tree_file(tree, "/etc/status") is None
+    with pytest.raises(blobs.BlobBuildError, match="not in the tree"):
+        blobs.read_version(tree, None, "/etc/rootfs-version")
+
+
+def test_the_l4t_boot_files_are_read_through_the_tree(
+    l4t_tree, tmp_path, fake_veritysetup, capsys
+):
+    real = l4t_tree / "boot" / "Image"
+    (l4t_tree / "boot" / "Image-6.8").write_bytes(real.read_bytes())
+    real.unlink()
+    os.symlink("/boot/Image-6.8", real)  # absolute: resolved in the tree
+    build(l4t_tree, tmp_path / "out", platform="l4t")
+    assert boot_blob(tmp_path / "out")["Image"] == b"IMAGE" * 1000
+    real.unlink()
+    os.symlink(str(tmp_path / "out" / "spec.json"), real)  # out of the tree: not there
+    out = refused(
+        capsys, "--platform", "l4t", "--rootfs-dir", str(l4t_tree), "--out",
+        str(tmp_path / "out2"), "--version-file", VERSION_FILE,
+    )  # fmt: skip
+    assert "no kernel" in out
+
+
+def test_a_data_image_given_as_a_symlink_is_refused(tree, tmp_path, fake_veritysetup):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "models.spec.json").write_text("{}")
+    os.symlink(str(tmp_path / "elsewhere.img"), data / "models.img")
+    build(tree, tmp_path / "out")
+    with pytest.raises(blobs.BlobBuildError, match="symlink"):
+        blobs.add_data_images(tmp_path / "out", data)

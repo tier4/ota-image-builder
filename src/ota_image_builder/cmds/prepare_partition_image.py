@@ -232,12 +232,18 @@ def _direct(args: Namespace, out: Path) -> None:
         kernel, initrd = blobs.find_grub_kernel(tree, args.kernel, args.initrd)
         dtb = None
     else:
-        kernel = Path(args.kernel) if args.kernel else tree / "boot" / "Image"
-        initrd = Path(args.initrd) if args.initrd else tree / "boot" / "initrd"
-        if not kernel.is_file():
-            raise blobs.BlobBuildError(f"no kernel at {kernel}; pass --kernel")
-        if not initrd.is_file():
-            raise blobs.BlobBuildError(f"no initramfs at {initrd}; pass --initrd")
+        kernel = (
+            Path(args.kernel) if args.kernel else blobs.tree_file(tree, "/boot/Image")
+        )
+        initrd = (
+            Path(args.initrd) if args.initrd else blobs.tree_file(tree, "/boot/initrd")
+        )
+        if kernel is None or not kernel.is_file():
+            raise blobs.BlobBuildError(f"no kernel at {tree}/boot/Image; pass --kernel")
+        if initrd is None or not initrd.is_file():
+            raise blobs.BlobBuildError(
+                f"no initramfs at {tree}/boot/initrd; pass --initrd"
+            )
         dtb = blobs.find_l4t_dtb(tree, args.dtb)
 
     out.mkdir(parents=True, exist_ok=True)
