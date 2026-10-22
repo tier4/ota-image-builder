@@ -135,10 +135,11 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
                 OTAClientPackageManifest.Descriptor,
             ),
         ):
-            # the agent's bundles, under either manifest kind
+            # the manifest's config and the agent's bundles, under either manifest kind
             _manifest = manifest_descriptor.load_metafile_from_resource_dir(
                 _resource_dir
             )
+            _res.add(_manifest.config.digest.digest)
             for _bundle in _manifest.layers:
                 _res.add(_bundle.digest.digest)
         elif isinstance(manifest_descriptor, PartitionImageManifest.Descriptor):

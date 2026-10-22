@@ -104,9 +104,13 @@ def add_bundles(
         logger.info(
             f"Add update agent {_type} {_version} ({_arch or 'any'}) from {_file} ..."
         )
-    index_helper.image_index.add_update_agent_package(
-        add_update_agent_package(bundles, resource_dir=index_helper.image_resource_dir)
-    )
+    try:
+        _descriptor = add_update_agent_package(
+            bundles, resource_dir=index_helper.image_resource_dir
+        )
+    except ValueError as e:  # pydantic's ValidationError is one
+        exit_with_err_msg(f"cannot add the update agent package: {e}")
+    index_helper.image_index.add_update_agent_package(_descriptor)
 
 
 def add_update_agent_package_cmd(args: Namespace) -> None:

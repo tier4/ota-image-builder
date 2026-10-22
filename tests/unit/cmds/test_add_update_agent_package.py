@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from ota_image_builder.cmds.add_update_agent_package import _parse_bundle
+from ota_image_builder.cmds.add_update_agent_package import _parse_bundle, add_bundles
 
 
 def test_a_bundle_spec_is_file_type_version_and_an_optional_arch(tmp_path: Path):
@@ -63,3 +63,15 @@ def test_bad_bundle_specs_are_refused(tmp_path: Path, capsys, spec, message):
     with pytest.raises(SystemExit):
         _parse_bundle(spec.format(f=f))
     assert message in capsys.readouterr().out
+
+
+def test_two_bundles_for_one_consumer_are_refused(tmp_path: Path, capsys, mocker):
+    """A consumer would have to choose between them: the image is not built."""
+    f = tmp_path / "agent.tar.gz"
+    f.write_bytes(b"x")
+    helper = mocker.MagicMock()
+    helper.image_resource_dir = tmp_path
+    with pytest.raises(SystemExit):
+        add_bundles(helper, [(f, "t", "1.0.0", "arm64"), (f, "t", "1.0.1", "aarch64")])
+    assert "more than one bundle of type 't'" in capsys.readouterr().out
+    helper.image_index.add_update_agent_package.assert_not_called()

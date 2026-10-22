@@ -233,6 +233,16 @@ def test_an_override_for_an_image_not_listed_is_an_error(tmp_path, fake_tools, c
             "    requires: {rootfs: {min: '2 0'}}\n",
             "is not a version",
         ),
+        (
+            "data_images:\n  - name: a\n    mount: /x\n    version: '1'\n"
+            "    requires: {rootfs: {min: 'v2.0'}}\n",
+            "is not a version",
+        ),
+        (
+            "data_images:\n  - name: a\n    mount: /x\n    version: '1'\n"
+            "    requires: {rootfs: {min: '2.0', max: '2.0.0'}}\n",
+            "is not below max",
+        ),
         ("persist_files: [/etc/hosts]\n", "only data_images is read"),
         (
             "data_images:\n  - name: a\n    mount: /x\n    version: '1'\n    component: 'T4 ML'\n",

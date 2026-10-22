@@ -41,33 +41,38 @@ class TestCollectProtectedResourcesDigest:
 
     def test_the_bundles_of_either_agent_manifest_kind_are_protected(self, mocker):
         """An update agent release package and an OTAClient release package both hold
-        bundles that must never be bundled, compressed or sliced; a pipeline with an
-        older step still writes the latter."""
+        a config and bundles that must never be bundled, compressed or sliced (the
+        update agent package's config is the 2-byte `{}`, which a rootfs may well hold
+        as a file too); a pipeline with an older step still writes the latter."""
         from ota_image_libs.v1.otaclient_package.schema import OTAClientPackageManifest
         from ota_image_libs.v1.update_agent_package.schema import (
             UpdateAgentPackageManifest,
         )
 
-        def manifest_descriptor(kind, bundle_digest: bytes, own_digest: bytes):
+        def manifest_descriptor(kind, prefix: bytes):
             d = mocker.MagicMock()
             d.__class__ = kind.Descriptor  # what the isinstance dispatch looks at
-            d.digest.digest = own_digest
+            d.digest.digest = prefix + b"-manifest"
             bundle = mocker.MagicMock()
-            bundle.digest.digest = bundle_digest
-            d.load_metafile_from_resource_dir.return_value.layers = [bundle]
+            bundle.digest.digest = prefix + b"-bundle"
+            loaded = d.load_metafile_from_resource_dir.return_value
+            loaded.layers = [bundle]
+            loaded.config.digest.digest = prefix + b"-config"
             return d
 
         mock_helper = mocker.MagicMock()
         mock_helper.image_index.manifests = [
-            manifest_descriptor(
-                UpdateAgentPackageManifest, b"ua-bundle", b"ua-manifest"
-            ),
-            manifest_descriptor(OTAClientPackageManifest, b"oc-bundle", b"oc-manifest"),
+            manifest_descriptor(UpdateAgentPackageManifest, b"ua"),
+            manifest_descriptor(OTAClientPackageManifest, b"oc"),
         ]
 
         result = _collect_protected_resources_digest(mock_helper)
 
-        assert result == {b"ua-bundle", b"ua-manifest", b"oc-bundle", b"oc-manifest"}
+        assert result == {
+            f"{kind}-{part}".encode()
+            for kind in ("ua", "oc")
+            for part in ("manifest", "config", "bundle")
+        }
 
 
 class TestFinalizeCmd:

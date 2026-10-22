@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
+from ota_image_libs.v1.partition_image.schema import version_key
 
 from ota_image_builder._common import exit_with_err_msg
 from ota_image_builder.v1 import _partition_blobs as blobs
@@ -181,8 +182,13 @@ def check_list(
                 )
             lo, hi = (str(bounds.get(k) or "") for k in ("min", "max"))
             for b in (lo, hi):
-                if any(c in b for c in " \t\n:="):
-                    fail(f"{what}: requires.{what_req}: {b!r} is not a version")
+                if b and version_key(b) is None:
+                    fail(
+                        f"{what}: requires.{what_req}: {b!r} is not a version "
+                        "(dotted decimal numbers, as the device compares them)"
+                    )
+            if lo and hi and version_key(lo) >= version_key(hi):  # type: ignore[operator]
+                fail(f"{what}: requires.{what_req}: min {lo!r} is not below max {hi!r}")
             ranges[what_req] = VersionRangeSpec(min=lo or None, max=hi or None)
         entries.append(
             {
