@@ -505,19 +505,25 @@ def check_l4t_cmdline_fits(cmdline: str, cmdline_extra: str) -> None:
         raise BlobBuildError(
             "an l4t payload needs ota_image_tools.libs.bootimg to check its command line"
         ) from e
-    for _, part, scratch in L4T_SLOT_LABELS:
-        resolved = cmdline.replace("${slot}", part).replace("${scratch}", scratch)
-        try:
-            bootimg.check_cmdline(resolved)
-        except bootimg.BootImageError as e:
-            composed = len(resolved.encode()) - (
-                len(cmdline_extra) + 1 if cmdline_extra else 0
-            )
-            raise BlobBuildError(
-                f"{e}: on {part} the composed arguments take {composed} bytes, leaving "
-                f"{max(bootimg.CMDLINE_LEN - 2 - composed, 0)} for --cmdline "
-                f"({len(cmdline_extra)} given)"
-            ) from e
+    # the slot with the longest labels decides: one blob goes to either
+    part, resolved = max(
+        (
+            (part, cmdline.replace("${slot}", part).replace("${scratch}", scratch))
+            for _, part, scratch in L4T_SLOT_LABELS
+        ),
+        key=lambda pr: len(pr[1].encode()),
+    )
+    try:
+        bootimg.check_cmdline(resolved)
+    except bootimg.BootImageError as e:
+        composed = len(resolved.encode()) - (
+            len(cmdline_extra) + 1 if cmdline_extra else 0
+        )
+        raise BlobBuildError(
+            f"{e}: on {part} the composed arguments take {composed} bytes, leaving "
+            f"{max(bootimg.CMDLINE_LEN - 2 - composed, 0)} for --cmdline "
+            f"({len(cmdline_extra)} given)"
+        ) from e
 
 
 def _resolve_in_boot(tree: Path, p: Path) -> Path | None:
