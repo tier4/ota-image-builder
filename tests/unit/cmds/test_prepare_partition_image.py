@@ -462,6 +462,17 @@ def test_the_firmware_capsule_is_linked_and_named_in_the_spec(
         (["--firmware", "CAP"], "--firmware needs --firmware-version"),
         (["--firmware-version", "39.2.0"], "--firmware-version without --firmware"),
         (["--firmware", "MISSING", "--firmware-version", "1"], "no such file"),
+        (
+            [
+                "--firmware",
+                "CAP",
+                "--firmware-version",
+                "1",
+                "--firmware-name",
+                "T4 L4T BSP",
+            ],
+            "--firmware-name may contain only",
+        ),
     ],
 )
 def test_a_firmware_option_that_cannot_work_is_refused_before_the_image_is_built(
@@ -476,6 +487,64 @@ def test_a_firmware_option_that_cannot_work_is_refused_before_the_image_is_built
     ]  # fmt: skip
     assert why in refused(capsys, *argv)
     assert not (tmp_path / "out" / "rootfs.img").exists()
+
+
+def test_an_l4t_cmdline_that_fits_the_boot_image_is_carried(
+    l4t_tree, tmp_path, fake_veritysetup
+):
+    out = tmp_path / "out"
+    build(l4t_tree, out, "--cmdline", "quiet", platform="l4t")
+    assert boot_blob(out)["cmdline"].decode().endswith(" pci=pcie_bus_perf quiet")
+
+
+def test_an_l4t_cmdline_the_boot_image_cannot_hold_is_refused_before_the_image(
+    l4t_tree, tmp_path, fake_veritysetup, capsys
+):
+    """The board's own arguments fill most of the 511 bytes: a device would refuse to
+    pack this boot image after the download. Refused here, before mkfs."""
+    out = refused(
+        capsys, "--platform", "l4t", "--rootfs-dir", str(l4t_tree), "--out", str(tmp_path / "out"),
+        "--version-file", VERSION_FILE, "--cmdline", "audit=1 audit_backlog_limit=8192",
+    )  # fmt: skip
+    assert "the boot image holds 511" in out
+    assert "leaving" in out and "for --cmdline (32 given)" in out
+    assert not (tmp_path / "out" / "rootfs.img").exists()
+
+
+@pytest.mark.parametrize(
+    ("cmdline", "why"),
+    [
+        ("quiet\nsource /boot/evil.cfg", "one line of arguments"),
+        ("quiet; reboot", "one line of arguments"),
+        ("root=$slot", "one line of arguments"),
+        ("quiet  splash", "one line of arguments"),
+        ("quiet\n", "one line of arguments"),
+        ("verity=0", "may not set verity"),
+        ("quiet root=/dev/sda2 rw", "may not set root, rw"),
+        ("init=/bin/sh", "may not set init"),
+    ],
+)
+def test_a_cmdline_that_would_undo_the_verity_root_is_refused(
+    tree, tmp_path, capsys, cmdline, why
+):
+    """Appended to the composed arguments as it is: a newline or `;` adds a GRUB command,
+    `$` is expanded, and a repeated key wins over the composed one."""
+    out = refused(
+        capsys, "--platform", "grub", "--rootfs-dir", str(tree), "--out", str(tmp_path / "out"),
+        "--version-file", VERSION_FILE, "--cmdline", cmdline,
+    )  # fmt: skip
+    assert why in out
+    assert not (tmp_path / "out" / "rootfs.img").exists()
+
+
+def test_a_cmdline_of_keys_that_only_start_like_composed_ones_is_carried(
+    tree, tmp_path, fake_veritysetup
+):
+    out = tmp_path / "out"
+    build(tree, out, "--cmdline", "rootwait rootdelay=5 panic_on_oops=1 audit=1")
+    assert "panic=10 rootwait rootdelay=5 panic_on_oops=1 audit=1\n" in (
+        boot_blob(out)["grub.cfg"].decode()
+    )
 
 
 def test_firmware_is_l4t_s(tree, tmp_path, capsys):
@@ -517,6 +586,10 @@ def test_a_vendor_package_spec(tmp_path, capsys):
     assert "no --rootfs-dir, --platform" in refused(
         capsys, "--vendor-package", str(pkg), "--format", "x", "--version", "1.0.0",
         "--platform", "grub", "--out", str(out),
+    )  # fmt: skip
+    assert "--cmdline: the package is the payload" in refused(
+        capsys, "--vendor-package", str(pkg), "--format", "x", "--version", "1.0.0",
+        "--cmdline", "quiet", "--out", str(out),
     )  # fmt: skip
     assert "--platform is required" in refused(
         capsys, "--rootfs-dir", str(tmp_path), "--version", "1.0.0", "--out", str(out)

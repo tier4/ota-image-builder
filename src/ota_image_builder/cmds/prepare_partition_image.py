@@ -144,10 +144,10 @@ def _check_args(args: Namespace) -> None:
             exit_with_err_msg("--vendor-package takes --format")
         if not args.version:
             exit_with_err_msg("--vendor-package needs --version")
-        if args.rootfs_dir or args.platform or args.version_file:
+        if args.rootfs_dir or args.platform or args.version_file or args.cmdline:
             exit_with_err_msg(
-                "--vendor-package takes no --rootfs-dir, --platform or --version-file: "
-                "the package is the payload"
+                "--vendor-package takes no --rootfs-dir, --platform, --version-file or "
+                "--cmdline: the package is the payload"
             )
         if not Path(args.vendor_package).is_file():
             exit_with_err_msg(f"--vendor-package: no such file: {args.vendor_package}")
@@ -169,6 +169,10 @@ def _check_args(args: Namespace) -> None:
             exit_with_err_msg(
                 "--firmware needs --firmware-version (what the firmware will report, e.g. 39.2.0)"
             )
+        if not blobs.NAME_RE.match(args.firmware_name):
+            exit_with_err_msg(
+                "--firmware-name may contain only letters, digits, . _ + -"
+            )
     elif args.firmware_version:
         exit_with_err_msg("--firmware-version without --firmware")
     if args.installer_out and args.platform != "l4t":
@@ -179,6 +183,10 @@ def _check_args(args: Namespace) -> None:
         exit_with_err_msg("--name may contain only letters, digits, . _ + -")
     if args.panic < 0:
         exit_with_err_msg("--panic must be a number of seconds")
+    try:
+        blobs.check_cmdline_extra(args.cmdline)
+    except blobs.BlobBuildError as e:
+        exit_with_err_msg(str(e))
     if not (args.version or args.version_file):
         exit_with_err_msg(
             "pass --version, or --version-file naming the file in the tree that holds it"
@@ -234,8 +242,21 @@ def _direct(args: Namespace, out: Path) -> None:
 
     out.mkdir(parents=True, exist_ok=True)
     img = out / "rootfs.img"
+    size_mib = blobs.rootfs_image_size_mib(tree, args.size)
+    if args.platform == "l4t":
+        # The template's length is known before the root hash is: refuse a command
+        # line the boot image cannot hold before minutes of mkfs, not after.
+        blobs.check_l4t_cmdline_fits(
+            blobs.l4t_cmdline(
+                "0" * 64,
+                size_mib * 1024 * 1024,
+                panic=args.panic,
+                cmdline_extra=args.cmdline,
+            ),
+            args.cmdline,
+        )
     data_size, root_hash = blobs.make_verity_rootfs_image(
-        tree, img, args.size, version=version
+        tree, img, size_mib, version=version
     )
 
     if args.platform == "grub":

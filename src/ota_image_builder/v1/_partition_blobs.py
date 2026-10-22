@@ -34,6 +34,7 @@ External tools, as the platforms ship them: mkfs.ext4 (e2fsprogs), veritysetup
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import logging
 import os
@@ -79,6 +80,29 @@ L4T_ARGS = (
 """What the board needs on the command line, taken from a working device's
 /proc/cmdline with root= and rw dropped: the root is named by the initramfs, and it
 is read-only."""
+L4T_SLOT_LABELS = (("a", "APP", "scratch_a"), ("b", "APP_b", "scratch_b"))
+"""Per slot, the partition labels the agent puts for ${slot} and ${scratch} before it
+packs the boot image: the flash layout's, fixed there, not here."""
+
+CMDLINE_ARG_RE = re.compile(r"[A-Za-z0-9._,:=/+@-]+")
+"""One argument of --cmdline: what kernel arguments are made of, and nothing GRUB
+reads as more than a word (no `;` or newline to start a command, no `$` to expand)."""
+COMPOSED_CMDLINE_KEYS = frozenset(
+    {
+        "root",
+        "rootfstype",
+        "ro",
+        "rw",
+        "verity",
+        "verityinfo",
+        "rw_overlay",
+        "panic",
+        "init",
+        "rdinit",
+    }
+)
+"""What this tool sets for the verity root. The kernel takes the last of a repeated
+argument, so --cmdline setting one of these would undo it (verity=0, another root=)."""
 
 NAME_RE = re.compile(r"^[A-Za-z0-9._+-]+$")
 DATA_IMAGE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -223,13 +247,9 @@ def append_verity_tree(img: Path, data_size: int, seed: str | None = None) -> st
     return root_hash
 
 
-def make_verity_rootfs_image(
-    tree: Path, img: Path, size_mib: int | None = None, *, version: str
-) -> tuple[int, str]:
-    """The tree as an ext4 image with its hash tree appended: (where the hash tree
-    starts, the root hash). `version` seeds the UUIDs: one version and one tree make
-    one image."""
-    img.unlink(missing_ok=True)
+def rootfs_image_size_mib(tree: Path, size_mib: int | None = None) -> int:
+    """The ext4 image's size before the hash tree, which is where the hash tree starts:
+    known before mkfs, so that the boot files' command line is too."""
     if size_mib is None:
         # A read-only verity root needs no room to grow: the headroom covers mkfs
         # overhead and small files rounding up to 4 KiB blocks, which du's apparent
@@ -239,7 +259,17 @@ def make_verity_rootfs_image(
     if size_mib <= 0:
         raise BlobBuildError("--size must be a number of MiB")
     # 4 MiB multiples keep the data size a multiple of the verity block.
-    size_mib = (size_mib + 3) // 4 * 4
+    return (size_mib + 3) // 4 * 4
+
+
+def make_verity_rootfs_image(
+    tree: Path, img: Path, size_mib: int | None = None, *, version: str
+) -> tuple[int, str]:
+    """The tree as an ext4 image with its hash tree appended: (where the hash tree
+    starts, the root hash). `version` seeds the UUIDs: one version and one tree make
+    one image."""
+    img.unlink(missing_ok=True)
+    size_mib = rootfs_image_size_mib(tree, size_mib)
     logger.info(f"{img.name}: {size_mib} MiB ext4 from {tree}")
     with img.open("wb") as f:
         f.truncate(size_mib * 1024 * 1024)
@@ -433,6 +463,63 @@ def _verity_cmdline(root_hash: str, data_size: int, panic: int) -> str:
     )
 
 
+def check_cmdline_extra(cmdline_extra: str) -> None:
+    """--cmdline goes as it is after the arguments this tool composes, into grub.cfg's
+    `linux` line or the L4T boot image: plain arguments on one line, none of which
+    sets what the verity root depends on."""
+    if not cmdline_extra:
+        return
+    args = cmdline_extra.split(" ")
+    if not all(CMDLINE_ARG_RE.fullmatch(arg) for arg in args):
+        raise BlobBuildError(
+            "--cmdline is one line of arguments separated by single spaces, made of "
+            "letters, digits and . _ , : = / + @ -"
+        )
+    composed = [
+        k for k in (arg.split("=", 1)[0] for arg in args) if k in COMPOSED_CMDLINE_KEYS
+    ]
+    if composed:
+        raise BlobBuildError(
+            f"--cmdline may not set {', '.join(composed)}: this tool sets them for the verity root"
+        )
+
+
+def l4t_cmdline(
+    root_hash: str, data_size: int, *, panic: int, cmdline_extra: str
+) -> str:
+    """The command line template the L4T boot files carry: one line, since it goes into
+    a fixed-width header field, with ${slot} and ${scratch} for the agent to fill."""
+    cmdline = f"root=/dev/mapper/vroot ro rootfstype=ext4 {_verity_cmdline(root_hash, data_size, panic)} {L4T_ARGS}"
+    if cmdline_extra:
+        cmdline += f" {cmdline_extra}"
+    return " ".join(cmdline.split())
+
+
+def check_l4t_cmdline_fits(cmdline: str, cmdline_extra: str) -> None:
+    """Refuse a template that, filled in for either slot, does not fit the boot image's
+    command line field: the device would refuse to pack it, after the download, with
+    the update already announced."""
+    try:
+        from ota_image_tools.libs import bootimg
+    except ImportError as e:
+        raise BlobBuildError(
+            "an l4t payload needs ota_image_tools.libs.bootimg to check its command line"
+        ) from e
+    for _, part, scratch in L4T_SLOT_LABELS:
+        resolved = cmdline.replace("${slot}", part).replace("${scratch}", scratch)
+        try:
+            bootimg.check_cmdline(resolved)
+        except bootimg.BootImageError as e:
+            composed = len(resolved.encode()) - (
+                len(cmdline_extra) + 1 if cmdline_extra else 0
+            )
+            raise BlobBuildError(
+                f"{e}: on {part} the composed arguments take {composed} bytes, leaving "
+                f"{max(bootimg.CMDLINE_LEN - 2 - composed, 0)} for --cmdline "
+                f"({len(cmdline_extra)} given)"
+            ) from e
+
+
 def _resolve_in_boot(tree: Path, p: Path) -> Path | None:
     """A path or symlink under <tree>/boot, resolved inside the tree."""
     if p.is_symlink():
@@ -557,12 +644,10 @@ def l4t_boot_tar(
     """Image, initrd, the board DTB and the command line template: the agent packs the
     Android boot image on the device, after substituting ${slot} and ${scratch}, so the
     same blob goes to whichever kernel partition is standby. Returns the template."""
-    cmdline = f"root=/dev/mapper/vroot ro rootfstype=ext4 {_verity_cmdline(root_hash, data_size, panic)} {L4T_ARGS}"
-    if cmdline_extra:
-        cmdline += f" {cmdline_extra}"
-    cmdline = " ".join(
-        cmdline.split()
-    )  # one line: it goes into a fixed-width header field
+    cmdline = l4t_cmdline(
+        root_hash, data_size, panic=panic, cmdline_extra=cmdline_extra
+    )
+    check_l4t_cmdline_fits(cmdline, cmdline_extra)
     _reproducible_tar(
         out,
         {
@@ -600,7 +685,7 @@ def pack_l4t_installer_images(
         ) from e
     installer_out.mkdir(parents=True, exist_ok=True)
     k, r = kernel.read_bytes(), initrd.read_bytes()
-    for slot, part, scratch in (("a", "APP", "scratch_a"), ("b", "APP_b", "scratch_b")):
+    for slot, part, scratch in L4T_SLOT_LABELS:
         resolved = cmdline.replace("${slot}", part).replace("${scratch}", scratch)
         try:
             packed = bootimg.pack(k, r, resolved)
@@ -738,3 +823,80 @@ def add_firmware(out: Path, name: str, version: str, fmt: str, file: Path) -> No
     logger.info(
         f"spec.json: firmware {name} {version} ({fmt}, {file.name}, {file.stat().st_size} bytes)"
     )
+
+
+# ------ the agent the tree carries ------ #
+
+PARTITION_AGENT_BUNDLE = "usr/local/lib/rootfs-ua/rootfs-ua-dpi"
+"""Where the platform installer puts the partition agent's bundle in the tree (the
+agent's `ROOTFS_UA_IMAGE_BUNDLE`): its entry point `rootfs-ua-dpi` and `AGENT_VERSION`
+beside it. The image's copy of the agent, which an image may also ship for a device
+running an older one to install and hand over to."""
+PARTITION_AGENT_ENTRYPOINT = "rootfs-ua-dpi"
+PARTITION_AGENT_VERSION_FILE = "AGENT_VERSION"
+ELF_MACHINES = {62: "x86_64", 183: "arm64"}
+"""e_machine -> the architecture name an update agent bundle is annotated with."""
+
+
+def _elf_architecture(exe: Path) -> str:
+    header = exe.read_bytes()[:20]
+    if len(header) < 20 or header[:4] != b"\x7fELF":
+        raise BlobBuildError(
+            f"{exe} is not an ELF executable: its architecture is unknown"
+        )
+    machine = int.from_bytes(header[18:20], "little" if header[5] == 1 else "big")
+    if machine not in ELF_MACHINES:
+        raise BlobBuildError(
+            f"{exe} is for ELF machine {machine}, which no agent bundle names"
+        )
+    return ELF_MACHINES[machine]
+
+
+def agent_bundle_from_tree(tree: Path, out_dir: Path) -> tuple[Path, str, str] | None:
+    """The tree's agent bundle as a .tar.gz in `out_dir`, with its version and
+    architecture; None for a tree that carries none. The tar holds the bundle
+    directory as it is (modes, symlinks), owned by root with fixed times, gzip
+    without a timestamp: one bundle, one blob."""
+    bundle = tree.resolve() / PARTITION_AGENT_BUNDLE
+    if not bundle.is_dir():
+        return None
+    entry = bundle / PARTITION_AGENT_ENTRYPOINT
+    if not entry.is_file():
+        raise BlobBuildError(
+            f"{bundle} has no {PARTITION_AGENT_ENTRYPOINT}: not an agent bundle"
+        )
+    version_file = bundle / PARTITION_AGENT_VERSION_FILE
+    version = version_file.read_text().strip() if version_file.is_file() else ""
+    if not NAME_RE.match(version):
+        raise BlobBuildError(
+            f"{version_file} holds {version!r}: an agent bundle names its version there"
+        )
+    arch = _elf_architecture(entry)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"rootfs-ua-dpi-{version}-{arch}.tar.gz"
+    with out.open("wb") as raw:
+        with gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as gz:
+            with tarfile.open(fileobj=gz, mode="w", format=tarfile.GNU_FORMAT) as tar:
+                paths = [bundle, *sorted(bundle.rglob("*"))]
+                for path in paths:
+                    arcname = PARTITION_AGENT_ENTRYPOINT
+                    if path != bundle:
+                        arcname += "/" + path.relative_to(bundle).as_posix()
+                    info = tar.gettarinfo(str(path), arcname)
+                    info.uid = info.gid = 0
+                    info.uname = info.gname = ""
+                    info.mtime = TAR_MTIME
+                    if info.islnk():
+                        # a second name for a file already in the tar: the agent
+                        # unpacks files, directories and symlinks only
+                        info.type, info.linkname = tarfile.REGTYPE, ""
+                        info.size = path.stat().st_size
+                    if info.isfile():
+                        with path.open("rb") as f:
+                            tar.addfile(info, f)
+                    else:
+                        tar.addfile(info)
+    logger.info(
+        f"agent bundle {version} ({arch}) from {bundle}: {out.stat().st_size} bytes"
+    )
+    return out, version, arch

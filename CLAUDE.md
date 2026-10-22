@@ -94,7 +94,7 @@ The builder provides the following subcommands (registered in `main.py`):
 | `add-partition-image` | `add_partition_image.py` | Add a partition-based payload from a spec JSON (composition in `v1/_partition_image.py`) |
 | `add-otaclient-package` | `add_otaclient_package.py` | Add OTAClient release package (never the update agent release package: clients on ota-image-libs < 0.6.0 refuse an index with a manifest kind they do not know) |
 | `add-otaclient-package-compat` | `add_otaclient_package_compat.py` | Legacy OTAClient compatibility |
-| `add-update-agent-package` | `add_update_agent_package.py` | Add update agent bundles (the agent that applies the image) |
+| `add-update-agent-package` | `add_update_agent_package.py` | Add update agent bundles (the agent that applies the image), given as files or taken from partition-based trees (`--rootfs-dir`) |
 | `finalize` | `finalize.py` | Optimize blobs (bundle, compress, slice filters) and finalize image |
 | `sign` | `sign.py` | Sign finalized image with ES256 JWT |
 | `sign-with-aws-kms-prepare` | `aws_kms_sign.py` | Finalize signing state and emit the unsigned JWT + an AWS KMS `Sign` request template (JSON) for KMS-based signing |
