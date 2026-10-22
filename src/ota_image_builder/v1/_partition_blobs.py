@@ -606,8 +606,10 @@ def grub_boot_tar(
 
 def find_l4t_dtb(tree: Path, dtb: str | None) -> Path:
     """The board DTB the image was built to boot with: extlinux.conf names it while the
-    tree still has one; after install-platform.sh has removed it, the only tegra DTB
-    in /boot. More than one and the build must be told which."""
+    tree still has one. install-platform.sh removes it, and a BSP's /boot holds the
+    DTBs of every board variant it supports; L4T keeps the one this board boots in
+    /boot/dtb (kernel_<board>.dtb, what extlinux.conf's FDT named), so that one, else
+    the only tegra DTB in /boot. More than one and the build must be told which."""
     if dtb:
         p = Path(dtb)
     else:
@@ -620,14 +622,22 @@ def find_l4t_dtb(tree: Path, dtb: str | None) -> Path:
             if m:
                 p = tree / m.group(1).lstrip("/")
         if p is None:
+            kernel_dtbs = (
+                sorted((tree / "boot" / "dtb").glob("*.dtb"))
+                if (tree / "boot" / "dtb").is_dir()
+                else []
+            )
             found = (
                 sorted((tree / "boot").glob("tegra*.dtb"))
                 if (tree / "boot").is_dir()
                 else []
             )
+            if len(kernel_dtbs) == 1:
+                found = kernel_dtbs
             if len(found) != 1:
                 raise BlobBuildError(
-                    f"expected one tegra*.dtb in {tree / 'boot'}, found {len(found)}; pass --dtb "
+                    f"expected one DTB in {tree / 'boot' / 'dtb'} or one tegra*.dtb in "
+                    f"{tree / 'boot'}, found {len(kernel_dtbs)} and {len(found)}; pass --dtb "
                     "(the board says which it is: cat /proc/device-tree/model)"
                 )
             p = found[0]

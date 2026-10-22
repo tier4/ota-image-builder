@@ -436,6 +436,28 @@ def test_the_l4t_boot_blob_and_the_flash_images(l4t_tree, tmp_path, fake_veritys
     assert os.path.samefile(flash / "rootfs.img", out / "rootfs.img")
 
 
+def test_the_board_dtb_is_the_one_l4t_keeps_in_boot_dtb(
+    l4t_tree, tmp_path, fake_veritysetup, capsys
+):
+    """A BSP's /boot carries every board variant's DTB and install-platform.sh removes
+    extlinux.conf: the one this board boots is L4T's /boot/dtb/kernel_<board>.dtb."""
+    for variant in ("AGX201", "AGX202", "AGX901"):
+        (l4t_tree / "boot" / f"tegra234-orin-agx-cti-{variant}.dtb").write_bytes(
+            variant.encode()
+        )
+    out = refused(
+        capsys, "--platform", "l4t", "--rootfs-dir", str(l4t_tree), "--out",
+        str(tmp_path / "out"), "--version-file", VERSION_FILE,
+    )  # fmt: skip
+    assert "expected one DTB" in out and "found 0 and 4" in out
+    (l4t_tree / "boot" / "dtb").mkdir()
+    (l4t_tree / "boot" / "dtb" / "kernel_tegra234-orin-agx-cti-AGX201.dtb").write_bytes(
+        b"AGX201"
+    )
+    build(l4t_tree, tmp_path / "out", platform="l4t")
+    assert boot_blob(tmp_path / "out")["board.dtb"] == b"AGX201"
+
+
 def test_the_firmware_capsule_is_linked_and_named_in_the_spec(
     l4t_tree, tmp_path, fake_veritysetup
 ):
