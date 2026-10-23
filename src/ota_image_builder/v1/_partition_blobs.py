@@ -656,7 +656,7 @@ def find_l4t_dtb(tree: Path, dtb: str | None) -> Path:
                 r"^\s*FDT\s+(\S+)", extlinux.read_text(errors="replace"), re.M
             )
             if m:
-                p = tree_file(tree, m.group(1)) or tree / m.group(1).lstrip("/")
+                p = tree_file(tree, m.group(1))
         if p is None:
             dtb_dir, boot = (
                 resolve_in_tree(tree, "/boot/dtb"),

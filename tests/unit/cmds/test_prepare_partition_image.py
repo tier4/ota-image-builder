@@ -649,6 +649,25 @@ def test_a_symlink_leading_out_of_the_tree_names_a_file_in_it(tmp_path):
         blobs.read_version(tree, None, "/etc/rootfs-version")
 
 
+@pytest.mark.parametrize("how", ["dotdot", "symlink"])
+def test_the_dtb_extlinux_names_is_read_through_the_tree(l4t_tree, tmp_path, how):
+    """FDT naming a file outside the tree, by `..` or by a symlink, finds nothing
+    there: the DTB comes from /boot/dtb, never from the build machine."""
+    host = tmp_path / "host.dtb"
+    host.write_bytes(b"HOST")
+    extlinux = l4t_tree / "boot" / "extlinux" / "extlinux.conf"
+    extlinux.parent.mkdir()
+    (l4t_tree / "boot" / "dtb").mkdir()
+    (l4t_tree / "boot" / "dtb" / "kernel_tegra234-board-a.dtb").write_bytes(b"board-a")
+    if how == "dotdot":
+        fdt = "/boot/" + "../" * len(l4t_tree.parts) + str(host).lstrip("/")
+    else:
+        os.symlink(str(host), l4t_tree / "boot" / "board.dtb")
+        fdt = "/boot/board.dtb"
+    extlinux.write_text(f"LABEL primary\n  FDT {fdt}\n")
+    assert blobs.find_l4t_dtb(l4t_tree, None).read_bytes() == b"board-a"
+
+
 def test_the_l4t_boot_files_are_read_through_the_tree(
     l4t_tree, tmp_path, fake_veritysetup, capsys
 ):
