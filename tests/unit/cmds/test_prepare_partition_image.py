@@ -649,6 +649,19 @@ def test_a_symlink_leading_out_of_the_tree_names_a_file_in_it(tmp_path):
         blobs.read_version(tree, None, "/etc/rootfs-version")
 
 
+@pytest.mark.parametrize("text", ["1.2.3 rc1\n", "1.2\n.3\n"])
+def test_a_version_file_of_two_words_is_refused(tmp_path, text):
+    """The device reports the whole file stripped: joining the words would give a
+    version it never reports."""
+    tree = tmp_path / "tree"
+    (tree / "etc").mkdir(parents=True)
+    (tree / "etc" / "rootfs-version").write_text(text)
+    with pytest.raises(blobs.BlobBuildError, match="holds 2 words"):
+        blobs.read_version(tree, None, "/etc/rootfs-version")
+    (tree / "etc" / "rootfs-version").write_text(" 1.2.3\n")
+    assert blobs.read_version(tree, None, "/etc/rootfs-version") == "1.2.3"
+
+
 @pytest.mark.parametrize("how", ["dotdot", "symlink"])
 def test_the_dtb_extlinux_names_is_read_through_the_tree(l4t_tree, tmp_path, how):
     """FDT naming a file outside the tree, by `..` or by a symlink, finds nothing

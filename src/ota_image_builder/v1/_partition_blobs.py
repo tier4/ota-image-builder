@@ -221,9 +221,17 @@ def read_version(
         path = tree_file(tree, version_file)
         if path is None:
             raise BlobBuildError(f"--version-file {version_file} is not in the tree")
-        baked = "".join(path.read_text().split())
-        if not baked:
+        # The device reports the file's text stripped, so a second word would be part
+        # of what it reports and never match a version joined or cut here.
+        words = path.read_text().split()
+        if not words:
             raise BlobBuildError(f"--version-file {version_file} is empty")
+        if len(words) > 1:
+            raise BlobBuildError(
+                f"--version-file {version_file} holds {len(words)} words; the version "
+                "is one, as the device reports the whole file"
+            )
+        baked = words[0]
         if version and version != baked:
             raise BlobBuildError(
                 f"--version {version} but the tree's {version_file} says {baked}; the "
