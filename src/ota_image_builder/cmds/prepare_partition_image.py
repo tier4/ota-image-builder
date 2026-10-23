@@ -83,8 +83,9 @@ def prepare_partition_image_cmd_args(
     )
     parser.add_argument(
         "--dtb",
-        help="l4t: the board DTB (default: the one <tree>/boot/extlinux names, else the "
-        "only tegra*.dtb).",
+        help="l4t: the board DTB (default: the one in <tree>/boot/dtb, else the only "
+        "tegra*.dtb in <tree>/boot; an extlinux.conf left in the tree must name the "
+        "same one). Taken as given: extlinux.conf is not checked then.",
     )
     parser.add_argument(
         "--size",

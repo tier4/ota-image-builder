@@ -649,54 +649,59 @@ def grub_boot_tar(
 
 
 def find_l4t_dtb(tree: Path, dtb: str | None) -> Path:
-    """The board DTB the image was built to boot with: extlinux.conf names it while the
-    tree still has one. install-platform.sh removes it, and a BSP's /boot holds the
-    DTBs of every board variant it supports; L4T keeps the one this board boots in
-    /boot/dtb (kernel_<board>.dtb, what extlinux.conf's FDT named), so that one, else
-    the only tegra DTB in /boot. More than one and the build must be told which."""
+    """The board DTB the image boots with: `dtb` as given, else the one L4T keeps for
+    this board in /boot/dtb (kernel_<board>.dtb), else, when /boot/dtb holds none,
+    the only tegra DTB in /boot (a BSP's /boot holds every board variant's). More
+    than one and the build must be told which. The device boots the kernel
+    partition, never extlinux.conf, and the platform installer removes it; a tree
+    that still has one whose FDT names another DTB was made to boot something else,
+    so it is refused, not guessed (unless `dtb` is given)."""
     if dtb:
         p = Path(dtb)
+        if not p.is_file():
+            raise BlobBuildError(f"no DTB at {p}; pass --dtb")
+        return p
+    dtb_dir, boot = (
+        resolve_in_tree(tree, "/boot/dtb"),
+        resolve_in_tree(tree, "/boot"),
+    )
+    # Counted by name: an entry in /boot/dtb that is no file in the tree (a dangling
+    # link, one leading out of it) fails the build instead of letting /boot decide.
+    kernel_dtbs = sorted(dtb_dir.glob("*.dtb")) if dtb_dir.is_dir() else []
+    boot_dtbs = sorted(boot.glob("tegra*.dtb")) if boot.is_dir() else []
+    if len(kernel_dtbs) == 1:
+        name = f"/boot/dtb/{kernel_dtbs[0].name}"
+    elif not kernel_dtbs and len(boot_dtbs) == 1:
+        name = f"/boot/{boot_dtbs[0].name}"
     else:
-        p = None
-        extlinux = tree_file(tree, "/boot/extlinux/extlinux.conf")
-        if extlinux:
-            m = re.search(
-                r"^\s*FDT\s+(\S+)", extlinux.read_text(errors="replace"), re.M
-            )
-            if m:
-                p = tree_file(tree, m.group(1))
-        if p is None:
-            dtb_dir, boot = (
-                resolve_in_tree(tree, "/boot/dtb"),
-                resolve_in_tree(tree, "/boot"),
-            )
-            kernel_dtbs = [
-                f
-                for f in (
-                    tree_file(tree, f"/boot/dtb/{d.name}")
-                    for d in (sorted(dtb_dir.glob("*.dtb")) if dtb_dir.is_dir() else [])
-                )
-                if f is not None
-            ]
-            found = [
-                f
-                for f in (
-                    tree_file(tree, f"/boot/{d.name}")
-                    for d in (sorted(boot.glob("tegra*.dtb")) if boot.is_dir() else [])
-                )
-                if f is not None
-            ]
-            if len(kernel_dtbs) == 1:
-                found = kernel_dtbs
-            if len(found) != 1:
+        raise BlobBuildError(
+            f"expected one DTB in {tree / 'boot' / 'dtb'}, else one tegra*.dtb in "
+            f"{tree / 'boot'}, found {len(kernel_dtbs)} and {len(boot_dtbs)}; pass "
+            "--dtb (the board says which it is: cat /proc/device-tree/model)"
+        )
+    p = tree_file(tree, name)
+    if p is None:
+        raise BlobBuildError(f"{name} is not a file in the tree; pass --dtb")
+    extlinux = tree_file(tree, "/boot/extlinux/extlinux.conf")
+    if extlinux is not None:
+        remedy = (
+            "make the two agree, remove /boot/extlinux/extlinux.conf from the tree "
+            "(the device boots the kernel partition, not extlinux.conf), or pass --dtb"
+        )
+        want = p.read_bytes()
+        for fdt in re.findall(
+            r"^[ \t]*FDT[ \t]+(\S+)", extlinux.read_text(errors="replace"), re.M
+        ):
+            named = tree_file(tree, fdt)
+            if named is None:
                 raise BlobBuildError(
-                    f"expected one DTB in {tree / 'boot' / 'dtb'} or one tegra*.dtb in "
-                    f"{tree / 'boot'}, found {len(kernel_dtbs)} and {len(found)}; pass --dtb "
-                    "(the board says which it is: cat /proc/device-tree/model)"
+                    f"{extlinux} names FDT {fdt}, which is not a file in the tree; {remedy}"
                 )
-            p = found[0]
-    if not p.is_file():
-        raise BlobBuildError(f"no DTB at {p}; pass --dtb")
+            if named.read_bytes() != want:
+                raise BlobBuildError(
+                    f"{extlinux} names FDT {fdt}, whose content is not {name}'s, the DTB "
+                    f"the image boots with; {remedy}"
+                )
     return p
 
 

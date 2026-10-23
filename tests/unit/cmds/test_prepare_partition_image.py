@@ -662,23 +662,116 @@ def test_a_version_file_of_two_words_is_refused(tmp_path, text):
     assert blobs.read_version(tree, None, "/etc/rootfs-version") == "1.2.3"
 
 
-@pytest.mark.parametrize("how", ["dotdot", "symlink"])
-def test_the_dtb_extlinux_names_is_read_through_the_tree(l4t_tree, tmp_path, how):
-    """FDT naming a file outside the tree, by `..` or by a symlink, finds nothing
-    there: the DTB comes from /boot/dtb, never from the build machine."""
-    host = tmp_path / "host.dtb"
-    host.write_bytes(b"HOST")
-    extlinux = l4t_tree / "boot" / "extlinux" / "extlinux.conf"
-    extlinux.parent.mkdir()
+@pytest.fixture
+def board_a(l4t_tree):
+    """An L4T tree as a BSP leaves it: every variant's DTB in /boot, this board's in
+    /boot/dtb, and an extlinux.conf (the platform installer has not run)."""
+    for variant in ("board-a", "board-b"):
+        (l4t_tree / "boot" / f"tegra234-{variant}.dtb").write_bytes(variant.encode())
     (l4t_tree / "boot" / "dtb").mkdir()
     (l4t_tree / "boot" / "dtb" / "kernel_tegra234-board-a.dtb").write_bytes(b"board-a")
+    return l4t_tree
+
+
+def extlinux(tree: Path, *fdts: str) -> None:
+    (tree / "boot" / "extlinux").mkdir(exist_ok=True)
+    (tree / "boot" / "extlinux" / "extlinux.conf").write_text(
+        "DEFAULT l0\n"
+        + "".join(
+            f"LABEL l{n}\n  LINUX /boot/Image\n  FDT {f}\n" for n, f in enumerate(fdts)
+        )
+    )
+
+
+def test_an_extlinux_fdt_naming_the_boot_dtb_one_is_taken(board_a):
+    """FDT naming /boot/dtb's DTB, by that path or by a copy of it, agrees with it;
+    a commented FDT, or one with no value, names nothing."""
+    extlinux(
+        board_a, "/boot/dtb/kernel_tegra234-board-a.dtb", "/boot/tegra234-board-a.dtb"
+    )
+    assert blobs.find_l4t_dtb(board_a, None).read_bytes() == b"board-a"
+    (board_a / "boot" / "extlinux" / "extlinux.conf").write_text(
+        "#  FDT /boot/x.dtb\nLABEL l0\n  FDT\n  INITRD /boot/initrd\n"
+    )
+    assert blobs.find_l4t_dtb(board_a, None).read_bytes() == b"board-a"
+
+
+@pytest.mark.parametrize(
+    "fdts, why",
+    [
+        (("/boot/tegra234-board-b.dtb",), "whose content is not"),
+        (
+            ("/boot/dtb/kernel_tegra234-board-a.dtb", "/boot/tegra234-board-b.dtb"),
+            "whose content is not",
+        ),
+        (("/boot/missing.dtb",), "which is not a file in the tree"),
+    ],
+)
+def test_an_extlinux_fdt_naming_another_dtb_is_refused(board_a, fdts, why):
+    """The image boots /boot/dtb's DTB whatever extlinux.conf says: an FDT naming
+    another one, in any entry, or one not in the tree, fails the build."""
+    extlinux(board_a, *fdts)
+    with pytest.raises(blobs.BlobBuildError, match=f"names FDT .*, {why}"):
+        blobs.find_l4t_dtb(board_a, None)
+
+
+def test_with_no_boot_dtb_extlinux_still_chooses_nothing(l4t_tree):
+    """Without /boot/dtb, /boot's only tegra DTB is the one; extlinux.conf neither
+    picks one of several nor overrules the only one."""
+    for variant in ("board-a", "board-b"):
+        (l4t_tree / "boot" / f"tegra234-{variant}.dtb").write_bytes(variant.encode())
+    extlinux(l4t_tree, "/boot/tegra234-board-a.dtb")
+    with pytest.raises(blobs.BlobBuildError, match="found 0 and 3"):
+        blobs.find_l4t_dtb(l4t_tree, None)
+    for variant in ("board-a", "board-b"):
+        (l4t_tree / "boot" / f"tegra234-{variant}.dtb").unlink()
+    (l4t_tree / "boot" / "other.dtb").write_bytes(b"other")
+    extlinux(l4t_tree, "/boot/other.dtb")
+    with pytest.raises(blobs.BlobBuildError, match="whose content is not"):
+        blobs.find_l4t_dtb(l4t_tree, None)
+    extlinux(l4t_tree, "/boot/tegra234-orin.dtb")
+    assert blobs.find_l4t_dtb(l4t_tree, None).name == "tegra234-orin.dtb"
+
+
+def test_a_boot_dtb_entry_that_is_no_file_is_refused(l4t_tree):
+    """A dangling link in /boot/dtb is still this board's DTB, missing: the build
+    fails instead of taking /boot's only tegra DTB, another board's."""
+    (l4t_tree / "boot" / "dtb").mkdir()
+    os.symlink("/boot/gone.dtb", l4t_tree / "boot" / "dtb" / "kernel_tegra234-x.dtb")
+    with pytest.raises(blobs.BlobBuildError, match="is not a file in the tree"):
+        blobs.find_l4t_dtb(l4t_tree, None)
+
+
+def test_dtb_given_is_taken_whatever_extlinux_says(board_a, tmp_path):
+    extlinux(board_a, "/boot/tegra234-board-b.dtb")
+    given = tmp_path / "given.dtb"
+    given.write_bytes(b"given")
+    assert blobs.find_l4t_dtb(board_a, str(given)) == given
+
+
+def test_two_dtbs_in_boot_dtb_are_refused(board_a):
+    """/boot/dtb holding two is not settled by the one tegra*.dtb in /boot."""
+    for name in ("tegra234-board-b.dtb", "tegra234-orin.dtb"):
+        (board_a / "boot" / name).unlink()
+    (board_a / "boot" / "dtb" / "kernel_tegra234-board-b.dtb").write_bytes(b"board-b")
+    with pytest.raises(blobs.BlobBuildError, match="found 2 and 1"):
+        blobs.find_l4t_dtb(board_a, None)
+
+
+@pytest.mark.parametrize("how", ["dotdot", "symlink"])
+def test_an_extlinux_fdt_leading_out_of_the_tree_is_refused(board_a, tmp_path, how):
+    """FDT naming a file outside the tree, by `..` or by a symlink, finds nothing
+    there: the build fails and the build machine's file is never read."""
+    host = tmp_path / "host.dtb"
+    host.write_bytes(b"board-a")  # the same bytes: still not the tree's
     if how == "dotdot":
-        fdt = "/boot/" + "../" * len(l4t_tree.parts) + str(host).lstrip("/")
+        fdt = "/boot/" + "../" * len(board_a.parts) + str(host).lstrip("/")
     else:
-        os.symlink(str(host), l4t_tree / "boot" / "board.dtb")
+        os.symlink(str(host), board_a / "boot" / "board.dtb")
         fdt = "/boot/board.dtb"
-    extlinux.write_text(f"LABEL primary\n  FDT {fdt}\n")
-    assert blobs.find_l4t_dtb(l4t_tree, None).read_bytes() == b"board-a"
+    extlinux(board_a, fdt)
+    with pytest.raises(blobs.BlobBuildError, match="which is not a file in the tree"):
+        blobs.find_l4t_dtb(board_a, None)
 
 
 def test_the_l4t_boot_files_are_read_through_the_tree(
