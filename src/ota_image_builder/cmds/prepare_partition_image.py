@@ -66,7 +66,7 @@ def prepare_partition_image_cmd_args(
     parser.add_argument(
         "--version-file",
         help="A file in the tree, as the device sees it (/etc/...), holding the version "
-        "the device will report: the payload carries that version.",
+        "the device will report, one word: the payload carries that version.",
     )
     parser.add_argument(
         "--name",

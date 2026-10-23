@@ -658,6 +658,8 @@ def test_a_version_file_of_two_words_is_refused(tmp_path, text):
     (tree / "etc" / "rootfs-version").write_text(text)
     with pytest.raises(blobs.BlobBuildError, match="holds 2 words"):
         blobs.read_version(tree, None, "/etc/rootfs-version")
+    with pytest.raises(blobs.BlobBuildError, match="holds 2 words"):
+        blobs.read_version(tree, "1.2.3rc1", "/etc/rootfs-version")  # the words joined
     (tree / "etc" / "rootfs-version").write_text(" 1.2.3\n")
     assert blobs.read_version(tree, None, "/etc/rootfs-version") == "1.2.3"
 
