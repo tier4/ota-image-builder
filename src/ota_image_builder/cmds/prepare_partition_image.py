@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 PLATFORMS = ("grub", "l4t")
+L4T_FIRMWARE_NAME = "l4t-bsp"
 
 
 def prepare_partition_image_cmd_args(
@@ -39,8 +40,8 @@ def prepare_partition_image_cmd_args(
         help=(
             _help_txt := "Build the blobs of a partition-based payload from a rootfs "
             "tree -- the rootfs image with its verity hash tree, the slot's boot files, "
-            "the data images -- or wrap a vendor package, and write the spec JSON "
-            "add-partition-image reads"
+            "the data images, the firmware -- or wrap a vendor package with its data "
+            "images and firmware, and write the spec JSON add-partition-image reads"
         ),
         description=_help_txt
         + ". Reproducible: two builds of one tree are one image. Run as root, since "
@@ -54,7 +55,11 @@ def prepare_partition_image_cmd_args(
         "menuentry fragment); l4t, Jetson (Image, initrd, the board DTB and a command "
         "line template). Required with --rootfs-dir; not for a vendor package.",
     )
-    parser.add_argument("--rootfs-dir", help="The rootfs tree the image is built from.")
+    parser.add_argument(
+        "--rootfs-dir",
+        help="The rootfs tree the image is built from. With --vendor-package, the tree "
+        "the package was built from, read for --version-file and nothing else.",
+    )
     parser.add_argument(
         "--out", required=True, help="Where the blobs and spec.json are written."
     )
@@ -114,8 +119,9 @@ def prepare_partition_image_cmd_args(
     )
     parser.add_argument(
         "--firmware",
-        help="l4t: the platform firmware package to carry beside the partitions (the "
-        "UEFI capsule for the bootloader chain), linked beside spec.json and named in it.",
+        help="The platform firmware package to carry beside the partitions, linked "
+        "beside spec.json and named in it: on l4t the UEFI capsule for the bootloader "
+        "chain; with --vendor-package a package in --firmware-format (not on grub).",
     )
     parser.add_argument(
         "--firmware-version",
@@ -123,13 +129,19 @@ def prepare_partition_image_cmd_args(
     )
     parser.add_argument(
         "--firmware-name",
-        default="l4t-bsp",
-        help="The firmware entry's name in the payload.",
+        help="The firmware entry's name in the payload, what a campaign addresses it "
+        f"by (default on l4t: {L4T_FIRMWARE_NAME}; required with --vendor-package).",
+    )
+    parser.add_argument(
+        "--firmware-format",
+        help="The firmware package's format string, opaque to this tool; required with "
+        "--firmware and --vendor-package (l4t's is the UEFI capsule's, "
+        f"{blobs.L4T_FIRMWARE_FORMAT}).",
     )
     parser.add_argument(
         "--vendor-package",
         help="A package the platform's own updater applies, linked beside spec.json as the "
-        "payload: no rootfs tree, no --platform.",
+        "payload: no --platform, and --rootfs-dir only to read --version-file.",
     )
     parser.add_argument(
         "--format", help="The vendor package's format string, opaque to this tool."
@@ -140,18 +152,9 @@ def prepare_partition_image_cmd_args(
 def _check_args(args: Namespace) -> None:
     """Argument errors first: before the tree is looked at and before twenty minutes
     of mkfs."""
+    _check_firmware(args)
     if args.vendor_package:
-        if not args.format:
-            exit_with_err_msg("--vendor-package takes --format")
-        if not args.version:
-            exit_with_err_msg("--vendor-package needs --version")
-        if args.rootfs_dir or args.platform or args.version_file or args.cmdline:
-            exit_with_err_msg(
-                "--vendor-package takes no --rootfs-dir, --platform, --version-file or "
-                "--cmdline: the package is the payload"
-            )
-        if not Path(args.vendor_package).is_file():
-            exit_with_err_msg(f"--vendor-package: no such file: {args.vendor_package}")
+        _check_vendor_args(args)
         return
     if args.format:
         exit_with_err_msg("--format goes with --vendor-package")
@@ -159,23 +162,6 @@ def _check_args(args: Namespace) -> None:
         exit_with_err_msg("--rootfs-dir is required (or --vendor-package)")
     if not args.platform:
         exit_with_err_msg("--platform is required with --rootfs-dir")
-    if args.firmware:
-        if args.platform != "l4t":
-            exit_with_err_msg(
-                "--firmware is l4t's: x86_64 has no updater to hand a package to"
-            )
-        if not Path(args.firmware).is_file():
-            exit_with_err_msg(f"--firmware: no such file: {args.firmware}")
-        if not args.firmware_version:
-            exit_with_err_msg(
-                "--firmware needs --firmware-version (what the firmware will report, e.g. 39.2.0)"
-            )
-        if not blobs.NAME_RE.match(args.firmware_name):
-            exit_with_err_msg(
-                "--firmware-name may contain only letters, digits, . _ + -"
-            )
-    elif args.firmware_version:
-        exit_with_err_msg("--firmware-version without --firmware")
     if args.installer_out and args.platform != "l4t":
         exit_with_err_msg("--installer-out is l4t's: the flash input")
     if args.dtb and args.platform != "l4t":
@@ -194,6 +180,94 @@ def _check_args(args: Namespace) -> None:
         )
 
 
+def _check_firmware(args: Namespace) -> None:
+    """--firmware and what goes with it, under either delivery: the payload's firmware
+    entry is the same whether the agent writes the partitions or a vendor package does."""
+    if not args.firmware:
+        given = [
+            opt
+            for opt, value in (
+                ("--firmware-version", args.firmware_version),
+                ("--firmware-name", args.firmware_name),
+                ("--firmware-format", args.firmware_format),
+            )
+            if value
+        ]
+        if given:
+            exit_with_err_msg(f"{', '.join(given)} without --firmware")
+        return
+    if args.platform == "grub":
+        exit_with_err_msg(
+            "--firmware is not grub's: x86_64 has no updater to hand a package to"
+        )
+    if not Path(args.firmware).is_file():
+        exit_with_err_msg(f"--firmware: no such file: {args.firmware}")
+    if not args.firmware_version:
+        exit_with_err_msg(
+            "--firmware needs --firmware-version (what the firmware will report, e.g. 39.2.0)"
+        )
+    if args.vendor_package:
+        # The platform's updater is not this tool's to know: its format and the name a
+        # campaign addresses the firmware by come from the caller, as --format does.
+        if not args.firmware_format:
+            exit_with_err_msg(
+                "--firmware with --vendor-package needs --firmware-format (the format "
+                "the platform's updater takes, opaque to this tool)"
+            )
+        if not args.firmware_name:
+            exit_with_err_msg(
+                "--firmware with --vendor-package needs --firmware-name (what a "
+                "campaign addresses the firmware by)"
+            )
+    elif args.firmware_format:
+        exit_with_err_msg(
+            "--firmware-format goes with --vendor-package: l4t's firmware is the UEFI "
+            f"capsule ({blobs.L4T_FIRMWARE_FORMAT})"
+        )
+    if not blobs.NAME_RE.match(args.firmware_name or L4T_FIRMWARE_NAME):
+        exit_with_err_msg("--firmware-name may contain only letters, digits, . _ + -")
+
+
+def _check_vendor_args(args: Namespace) -> None:
+    if not args.format:
+        exit_with_err_msg("--vendor-package takes --format")
+    # Refused, not dropped: each of these shapes the agent's own boot files or image,
+    # and the platform's tooling built those into the package already.
+    given = [
+        opt
+        for opt, value in (
+            ("--platform", args.platform),
+            ("--cmdline", args.cmdline),
+            ("--kernel", args.kernel),
+            ("--initrd", args.initrd),
+            ("--dtb", args.dtb),
+            ("--size", args.size),
+            ("--installer-out", args.installer_out),
+        )
+        if value
+    ]
+    if given:
+        exit_with_err_msg(
+            f"--vendor-package takes no {', '.join(given)}: the package is the payload"
+        )
+    if args.version_file and not args.rootfs_dir:
+        exit_with_err_msg(
+            "--version-file with --vendor-package needs --rootfs-dir: the tree the "
+            "package was built from"
+        )
+    if args.rootfs_dir and not args.version_file:
+        exit_with_err_msg(
+            "--rootfs-dir with --vendor-package is read for --version-file alone; pass "
+            "it, or --version without the tree"
+        )
+    if not (args.version or args.version_file):
+        exit_with_err_msg(
+            "--vendor-package needs --version, or --rootfs-dir and --version-file"
+        )
+    if not Path(args.vendor_package).is_file():
+        exit_with_err_msg(f"--vendor-package: no such file: {args.vendor_package}")
+
+
 def prepare_partition_image_cmd(args: Namespace) -> None:
     logger.debug(f"calling {prepare_partition_image_cmd.__name__} with {args}")
     _check_args(args)
@@ -208,14 +282,30 @@ def prepare_partition_image_cmd(args: Namespace) -> None:
 
 
 def _vendor(args: Namespace, out: Path) -> None:
+    version = args.version
+    if args.rootfs_dir:
+        # Only the version file is read: the package was built from this tree, and the
+        # device reports what the tree's file says, so the payload must carry that.
+        tree = Path(args.rootfs_dir).resolve()
+        if not tree.is_dir():
+            raise blobs.BlobBuildError(f"no such directory: {args.rootfs_dir}")
+        version = blobs.read_version(tree, args.version, args.version_file)
     out.mkdir(parents=True, exist_ok=True)
     package = Path(args.vendor_package)
     blobs._link_or_copy(package, out / package.name)
-    blobs.write_spec(out, blobs.vendor_spec(args.version, package.name, args.format))
+    blobs.write_spec(out, blobs.vendor_spec(version, package.name, args.format))
     if args.data_images:
         blobs.add_data_images(out, Path(args.data_images))
+    if args.firmware:
+        blobs.add_firmware(
+            out,
+            args.firmware_name,
+            args.firmware_version,
+            args.firmware_format,
+            Path(args.firmware),
+        )
     logger.info(
-        f"spec.json: {package.name} as the {args.format} package, version {args.version}"
+        f"spec.json: {package.name} as the {args.format} package, version {version}"
     )
 
 
@@ -289,7 +379,7 @@ def _direct(args: Namespace, out: Path) -> None:
     if args.firmware:
         blobs.add_firmware(
             out,
-            args.firmware_name,
+            args.firmware_name or L4T_FIRMWARE_NAME,
             args.firmware_version,
             blobs.L4T_FIRMWARE_FORMAT,
             Path(args.firmware),

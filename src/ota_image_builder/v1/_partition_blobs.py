@@ -859,8 +859,9 @@ def add_data_images(out: Path, data_dir: Path) -> int:
 
 
 def add_firmware(out: Path, name: str, version: str, fmt: str, file: Path) -> None:
-    """The platform firmware's package (on L4T the UEFI capsule), copied beside the
-    spec and named as the payload's `firmware` entry."""
+    """The platform firmware's package (on L4T the UEFI capsule; beside a DriveOS
+    vendor package, the MCU's), copied beside the spec and named as the payload's
+    `firmware` entry."""
     if not file.is_file():
         raise BlobBuildError(f"--firmware: no such file: {file}")
     if not version:
