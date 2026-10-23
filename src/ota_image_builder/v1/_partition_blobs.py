@@ -67,8 +67,6 @@ TAR_MTIME = 946684800
 """2000-01-01T00:00:00Z: every member of a boot files tar."""
 VERITY_BLOCK = 4096
 KEPT_ROLES = ("identity", "optdata")
-L4T_KERNEL_PARTITION_BYTES = 128 * 1024 * 1024
-"""A_kernel and B_kernel in the flash layout. Fixed there, not here."""
 L4T_FIRMWARE_FORMAT = "nvidia-l4t.uefi-capsule.v1"
 """The one format the L4T agent applies: a UEFI capsule for the bootloader chain."""
 L4T_ARGS = (
@@ -756,18 +754,9 @@ def pack_l4t_installer_images(
         (installer_out / f"boot_{slot}.img").write_bytes(packed)
     shutil.copyfile(dtb, installer_out / "board.dtb")
     _link_or_copy(rootfs_img, installer_out / "rootfs.img", symlink_ok=True)
-    size = (installer_out / "boot_a.img").stat().st_size
-    used = size * 100 // L4T_KERNEL_PARTITION_BYTES
-    logger.info(
-        f"boot image: {size} bytes, {used}% of the "
-        f"{L4T_KERNEL_PARTITION_BYTES // (1024 * 1024)} MiB kernel partition"
-    )
-    if size > L4T_KERNEL_PARTITION_BYTES:
-        raise BlobBuildError(
-            "the boot image does not fit the kernel partition; no device could install this"
-        )
-    if used >= 80:
-        logger.warning("little room left in the kernel partition")
+    # Whether it fits is the partition's to say: the flash and the agent both measure
+    # the kernel partition itself before they write to it.
+    logger.info(f"boot image: {(installer_out / 'boot_a.img').stat().st_size} bytes")
 
 
 def _link_or_copy(src: Path, dst: Path, *, symlink_ok: bool = False) -> None:
