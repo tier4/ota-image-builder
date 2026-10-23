@@ -308,3 +308,12 @@ class TestUpdateOneBatch:
         mock_orm.orm_insert_mappings.assert_called_once()
         mock_orm.orm_execute.assert_called_once()
         mock_orm.orm_update_entries_many.assert_called_once()
+
+    def test_update_db_updates_in_batches(self, mocker):
+        """Runs on every Python the package supports: 3.12's batched() takes no strict=."""
+        proc = object.__new__(SliceFilterProcesser)
+        proc._update_batch = 2
+        proc._db_helper = mocker.MagicMock()
+        one_batch = mocker.patch.object(sf_module, "_update_one_batch")
+        proc._update_db([(1, {}), (2, {}), (3, {})])  # type: ignore[arg-type]
+        assert one_batch.call_count == 2

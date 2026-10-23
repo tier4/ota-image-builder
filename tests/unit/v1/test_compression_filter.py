@@ -324,6 +324,21 @@ class TestCompressionFilterProcesser:
         # Should not be in compressed dict
         assert 1 not in compressed
 
+    def test_update_db_selects_the_compressed_entries_in_batches(self, mocker):
+        """Runs on every Python the package supports: 3.12's batched() takes no strict=."""
+        proc = object.__new__(CompressionFilterProcesser)
+        rs_orm = mocker.MagicMock()
+        rs_orm.orm_table_name = "rs_manifest"
+        rs_orm.orm_execute.return_value = []
+        proc._db_helper = mocker.MagicMock()
+        proc._db_helper.get_orm.return_value.__enter__.return_value = rs_orm
+        compressed = {
+            i: (sha256(str(i).encode()).digest(), 1)
+            for i in range(cf_module.SELECT_BATCH_SIZE + 1)
+        }
+        proc._update_db(compressed)  # type: ignore[arg-type]
+        assert rs_orm.orm_execute.call_count == 2
+
 
 class TestCompressedFilesDetector:
     """Tests for CompressedFilesDetector class."""
