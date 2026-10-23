@@ -4,7 +4,7 @@ annotated-types==0.8.0
     # via pydantic
 cffi==2.1.0 ; platform_python_implementation != 'PyPy'
     # via cryptography
-cryptography==48.0.1
+cryptography==50.0.2
     # via
     #   ota-image-builder
     #   ota-image-libs
@@ -12,7 +12,7 @@ msgpack==1.2.1
     # via
     #   ota-image-builder
     #   ota-image-libs
-ota-image-libs @ https://github.com/tier4/ota-image-libs/releases/download/v0.5.1/ota_image_libs-0.5.1-py3-none-any.whl
+ota-image-libs @ https://github.com/tier4/ota-image-libs/releases/download/v0.6.0/ota_image_libs-0.6.0-py3-none-any.whl
     # via ota-image-builder
 pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
     # via cffi
@@ -23,7 +23,7 @@ pydantic==2.13.4
     #   simple-sqlite3-orm
 pydantic-core==2.46.4
     # via pydantic
-pyjwt==2.13.0
+pyjwt==2.15.1
     # via
     #   ota-image-builder
     #   ota-image-libs

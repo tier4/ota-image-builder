@@ -743,7 +743,7 @@ def pack_l4t_installer_images(
         from ota_image_tools.libs import bootimg
     except ImportError as e:
         raise BlobBuildError(
-            "--installer-out needs ota_image_tools.libs.bootimg (ota-image-libs v0.7.0 or later)"
+            "--installer-out needs ota_image_tools.libs.bootimg (ota-image-libs v0.6.0 or later)"
         ) from e
     installer_out.mkdir(parents=True, exist_ok=True)
     k, r = kernel.read_bytes(), initrd.read_bytes()
