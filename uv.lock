@@ -395,7 +395,7 @@ requires-dist = [
     { name = "msgpack", specifier = ">=1.1,<2" },
     { name = "ota-image-libs", url = "https://github.com/tier4/ota-image-libs/releases/download/v0.6.0/ota_image_libs-0.6.0-py3-none-any.whl" },
     { name = "pydantic", specifier = ">=2.10,<3" },
-    { name = "pyjwt", specifier = ">=2.15,<3" },
+    { name = "pyjwt", specifier = ">=2.15,<2.16" },
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "simple-sqlite3-orm", specifier = "~=0.12" },
     { name = "typing-extensions", specifier = ">=4.6.3" },
