@@ -92,3 +92,6 @@ class TestAddOtaclientPackageCmd:
 
         mock_helper.sync_index.assert_called_once()
         mock_add.assert_called_once()
+        # Clients on ota-image-libs < 0.6.0 refuse an index listing a manifest kind
+        # they do not know: this command never adds the update agent release package.
+        mock_helper.image_index.add_update_agent_package.assert_not_called()

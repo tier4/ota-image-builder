@@ -1,0 +1,804 @@
+# Copyright 2026 TIER IV, INC. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Unit tests for cmds/prepare_partition_image.py: a rootfs tree in, the blobs and
+the spec out. veritysetup is faked so the pipeline runs anywhere; the real one, where
+installed, verifies the hash tree it wrote."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import logging
+import os
+import shutil
+import subprocess
+import tarfile
+from pathlib import Path
+
+import pytest
+from ota_image_tools.libs import bootimg
+
+from ota_image_builder.cmds.prepare_partition_image import (
+    prepare_partition_image_cmd_args,
+)
+from ota_image_builder.v1 import _partition_blobs as blobs
+from ota_image_builder.v1._partition_image import PartitionPayloadSpec
+
+HASH = "5f" * 32
+FAKE_HASH_TREE = 4096
+
+pytestmark = pytest.mark.skipif(
+    shutil.which("mkfs.ext4") is None, reason="mkfs.ext4 not installed"
+)
+
+
+@pytest.fixture
+def tree(tmp_path) -> Path:
+    root = tmp_path / "rootfs"
+    (root / "etc" / "initramfs-tools" / "hooks").mkdir(parents=True)
+    (root / "etc" / "rootfs-version").write_text("1.2.0\n")
+    (root / "etc" / "initramfs-tools" / "hooks" / "ota-verity").write_text(
+        "# ota-functions\n"
+    )
+    (root / "boot").mkdir()
+    (root / "boot" / "vmlinuz-6.8.0-1-generic").write_bytes(b"KERNEL" * 1000)
+    (root / "boot" / "initrd.img-6.8.0-1-generic").write_bytes(b"INITRD" * 1000)
+    os.symlink("vmlinuz-6.8.0-1-generic", root / "boot" / "vmlinuz")
+    os.symlink("initrd.img-6.8.0-1-generic", root / "boot" / "initrd.img")
+    (root / "usr" / "bin").mkdir(parents=True)
+    (root / "usr" / "bin" / "true").write_bytes(b"\x7fELF" + b"\0" * 100)
+    return root
+
+
+@pytest.fixture
+def fake_veritysetup(tmp_path, monkeypatch) -> None:
+    """`format` appends a fake hash tree and prints a root hash the way the real one
+    does; `verify` accepts anything."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake = bindir / "veritysetup"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'cmd="$1"; shift\n'
+        'case "$cmd" in\n'
+        "  format)\n"
+        '    for a in "$@"; do case "$a" in --*) ;; *) f="$a";; esac; done\n'
+        f'    head -c {FAKE_HASH_TREE} /dev/zero >> "$f"\n'
+        '    echo "VERITY header information for $f"\n'
+        '    echo "UUID:            	00000000-0000-0000-0000-000000000000"\n'
+        '    echo "Hash type:       	1"\n'
+        f'    echo "Root hash:      	{HASH}"\n'
+        "    ;;\n"
+        "  verify) exit 0 ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n"
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+
+
+def run(*argv: str) -> None:
+    parser = argparse.ArgumentParser()
+    prepare_partition_image_cmd_args(parser.add_subparsers())
+    args = parser.parse_args(["prepare-partition-image", *argv])
+    args.handler(args)
+
+
+VERSION_FILE = "/etc/rootfs-version"
+
+
+def build(tree: Path, out: Path, *args: str, platform: str = "grub") -> None:
+    run(
+        "--platform", platform, "--rootfs-dir", str(tree), "--out", str(out),
+        *(() if "--version" in args else ("--version-file", VERSION_FILE)), *args,
+    )  # fmt: skip
+
+
+def refused(capsys, *argv: str) -> str:
+    with pytest.raises(SystemExit) as e:
+        run(*argv)
+    assert e.value.code == 1
+    return capsys.readouterr().out
+
+
+def boot_blob(out: Path) -> dict[str, bytes]:
+    with tarfile.open(out / "boot.tar") as tar:
+        return {m.name: tar.extractfile(m).read() for m in tar.getmembers()}  # type: ignore[union-attr]
+
+
+def test_the_outputs_are_the_blobs_and_the_spec(tree, tmp_path, fake_veritysetup):
+    out = tmp_path / "out"
+    build(tree, out)
+
+    assert sorted(p.name for p in out.iterdir()) == [
+        "boot.tar",
+        "rootfs.img",
+        "rootfs.img.roothash",
+        "spec.json",
+    ]
+    spec = json.loads((out / "spec.json").read_text())
+    assert spec["delivery"] == "direct"
+    assert spec["version"] == "1.2.0"
+    by_name = {p["name"]: p for p in spec["partitions"]}
+    assert set(by_name) == {"rootfs", "boot", "scratch", "identity", "optdata"}
+    data_size = (out / "rootfs.img").stat().st_size - FAKE_HASH_TREE
+    assert by_name["rootfs"] == {
+        "name": "rootfs",
+        "action": "write",
+        "image": "rootfs.img",
+        "filesystem": "ext4",
+        "verity": {"root_hash": HASH, "hash_offset": data_size},
+    }
+    assert by_name["boot"] == {"name": "boot", "action": "write", "image": "boot.tar"}
+    assert by_name["scratch"] == {"name": "scratch", "action": "mkfs"}
+    assert by_name["identity"] == {"name": "identity", "action": "keep"}
+    assert by_name["optdata"] == {"name": "optdata", "action": "keep"}
+    for p in spec["partitions"]:
+        if "image" in p:
+            assert (out / p["image"]).is_file()
+    # what add-partition-image reads is what was written
+    model = PartitionPayloadSpec.model_validate_json((out / "spec.json").read_text())
+    assert {p.name: p.blob_kind for p in model.partitions if p.image} == {
+        "rootfs": "partition",
+        "boot": "boot-files",
+    }
+
+
+def test_the_rootfs_blob_is_ext4_with_the_hash_tree_appended(
+    tree, tmp_path, fake_veritysetup
+):
+    out = tmp_path / "out"
+    build(tree, out)
+    img = out / "rootfs.img"
+    with open(img, "rb") as f:
+        f.seek(0x438)
+        assert f.read(2) == b"\x53\xef", "not an ext4 superblock"
+    data_size = img.stat().st_size - FAKE_HASH_TREE
+    assert data_size % (4 * 1024 * 1024) == 0, "a whole number of 4 MiB"
+    assert (out / "rootfs.img.roothash").read_text().strip() == HASH
+
+
+def test_the_filesystem_uuid_is_derived_from_the_version_string(
+    tree, tmp_path, fake_veritysetup
+):
+    """s_uuid in the ext4 superblock is a function of the version the tree carries,
+    the string itself: the newline the version file ends with is not part of it, so a
+    build of this tree reproduces the image of every other build of it."""
+    out = tmp_path / "out"
+    build(tree, out)
+    with open(out / "rootfs.img", "rb") as f:
+        f.seek(1024 + 0x68)
+        s_uuid = f.read(16).hex()
+    assert s_uuid == blobs.derived_uuid("rootfs:1.2.0").replace("-", "")
+    assert s_uuid != blobs.derived_uuid("rootfs:1.2.0\n").replace("-", "")
+
+
+def test_the_boot_blob_binds_kernel_initrd_and_hash_to_the_slot_variables(
+    tree, tmp_path, fake_veritysetup
+):
+    out = tmp_path / "out"
+    build(tree, out, "--cmdline", "console=ttyS0,115200")
+    blob = boot_blob(out)
+    assert set(blob) == {"grub.cfg", "vmlinuz", "initrd.img"}
+    assert blob["vmlinuz"] == b"KERNEL" * 1000
+    assert blob["initrd.img"] == b"INITRD" * 1000
+
+    cfg = blob["grub.cfg"].decode()
+    data_size = (out / "rootfs.img").stat().st_size - FAKE_HASH_TREE
+    assert "linux /${slot}/vmlinuz " in cfg
+    assert "initrd /${slot}/initrd.img" in cfg
+    assert "root=/dev/mapper/vroot ro rootfstype=ext4 verity=1" in cfg
+    assert f"verityinfo=/dev/disk/by-partlabel/${{slot}}:{HASH}:{data_size}" in cfg
+    assert "rw_overlay=/dev/disk/by-partlabel/${scratch}:/mnt/rw_overlay" in cfg
+    assert "panic=10" in cfg
+    assert "console=ttyS0,115200" in cfg
+    assert "rootfs 1.2.0" in cfg
+    # every member root-owned with a fixed time: two builds are one tar
+    with tarfile.open(out / "boot.tar") as tar:
+        for m in tar.getmembers():
+            assert (m.uid, m.gid, m.mtime) == (0, 0, 946684800)
+
+
+def test_the_kernel_is_found_without_the_symlinks(tree, tmp_path, fake_veritysetup):
+    (tree / "boot" / "vmlinuz").unlink()
+    (tree / "boot" / "initrd.img").unlink()
+    (tree / "boot" / "vmlinuz-6.8.0-2-generic").write_bytes(b"NEWER")
+    (tree / "boot" / "initrd.img-6.8.0-2-generic").write_bytes(b"NEWER-RD")
+    out = tmp_path / "out"
+    build(tree, out)
+    blob = boot_blob(out)
+    assert blob["vmlinuz"] == b"NEWER"
+    assert blob["initrd.img"] == b"NEWER-RD"
+
+
+def test_a_version_that_disagrees_with_the_tree_is_refused(
+    tree, tmp_path, fake_veritysetup, capsys
+):
+    out = refused(
+        capsys, "--platform", "grub", "--rootfs-dir", str(tree), "--out",
+        str(tmp_path / "out"), "--version", "9.9.9", "--version-file", VERSION_FILE,
+    )  # fmt: skip
+    assert "says 1.2.0" in out
+    assert not (tmp_path / "out" / "rootfs.img").exists()
+
+
+def test_the_version_comes_from_the_caller_or_a_file_it_names(
+    tree, tmp_path, fake_veritysetup, capsys
+):
+    """Which file in the tree holds the version is the platform installer's
+    convention, named by the caller; this tool has none of its own."""
+    out = refused(
+        capsys, "--platform", "grub", "--rootfs-dir", str(tree), "--out", str(tmp_path / "out")
+    )  # fmt: skip
+    assert "--version" in out and "--version-file" in out
+    (tree / "etc" / "rootfs-version").unlink()
+    out = refused(
+        capsys, "--platform", "grub", "--rootfs-dir", str(tree), "--out", str(tmp_path / "out"),
+        "--version-file", VERSION_FILE,
+    )  # fmt: skip
+    assert "not in the tree" in out
+    build(tree, tmp_path / "out", "--version", "2.0.0")
+    assert (
+        json.loads((tmp_path / "out" / "spec.json").read_text())["version"] == "2.0.0"
+    )
+
+
+def test_a_tree_unpacked_without_root_is_refused(
+    tree, tmp_path, fake_veritysetup, capsys
+):
+    """A tree extracted by an ordinary user has every file owned by that user and no
+    setuid bits, and mkfs.ext4 -d copies that into the image: the device then boots
+    with a sudo that refuses to run. The tree's sudo is the tell."""
+    sudo = tree / "usr" / "bin" / "sudo"
+    sudo.write_bytes(b"\x7fELF" + b"\0" * 100)
+    sudo.chmod(0o755)
+    out = refused(
+        capsys,
+        "--platform",
+        "grub",
+        "--rootfs-dir",
+        str(tree),
+        "--version-file",
+        VERSION_FILE,
+        "--out",
+        str(tmp_path / "out"),
+    )
+    assert "unpacked without root" in out
+    assert not (tmp_path / "out" / "rootfs.img").exists()
+
+
+def test_a_tree_without_a_kernel_is_refused(tree, tmp_path, fake_veritysetup, capsys):
+    for p in (tree / "boot").iterdir():
+        p.unlink()
+    out = refused(
+        capsys,
+        "--platform",
+        "grub",
+        "--rootfs-dir",
+        str(tree),
+        "--version-file",
+        VERSION_FILE,
+        "--out",
+        str(tmp_path / "out"),
+    )
+    assert "no kernel" in out
+
+
+def test_the_panic_seconds_reach_the_cmdline(tree, tmp_path, fake_veritysetup):
+    out = tmp_path / "out"
+    build(tree, out, "--panic", "0")
+    assert "panic=0" in boot_blob(out)["grub.cfg"].decode()
+
+
+@pytest.mark.skipif(
+    shutil.which("veritysetup") is None, reason="veritysetup not installed"
+)
+def test_the_real_hash_tree_verifies(tree, tmp_path):
+    out = tmp_path / "out"
+    build(tree, out)
+    root_hash = (out / "rootfs.img.roothash").read_text().strip()
+    cfg = boot_blob(out)["grub.cfg"].decode()
+    offset = cfg.split(f":{root_hash}:", 1)[1].split()[0]
+    img = str(out / "rootfs.img")
+    subprocess.run(
+        ["veritysetup", "verify", img, img, root_hash, f"--hash-offset={offset}"],
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_data_images_from_the_built_directory_are_listed_in_the_spec(
+    tree, tmp_path, fake_veritysetup
+):
+    """Every <name>.spec.json build-data-images left goes into spec.json and its image
+    beside it. Nothing here knows an image by name."""
+    data = tmp_path / "data"
+    data.mkdir()
+    for name in ("ml_package", "maps"):
+        (data / f"{name}.img").write_bytes(b"\0" * 8192)
+        (data / f"{name}.spec.json").write_text(
+            json.dumps(
+                {
+                    "name": name,
+                    "version": "1",
+                    "mount": f"/opt/{name}",
+                    "image": f"{name}.img",
+                    "filesystem": "squashfs",
+                    "verity": {"root_hash": HASH, "hash_offset": 4096},
+                }
+            )
+        )
+    out = tmp_path / "out"
+    build(tree, out, "--data-images", str(data))
+
+    spec = json.loads((out / "spec.json").read_text())
+    assert sorted(d["name"] for d in spec["data_images"]) == ["maps", "ml_package"]
+    assert all(d["verity"]["root_hash"] == HASH for d in spec["data_images"])
+    assert (out / "ml_package.img").stat().st_size == 8192
+    assert (out / "maps.img").stat().st_size == 8192
+    assert [p["name"] for p in spec["partitions"]] == [
+        "rootfs",
+        "boot",
+        "scratch",
+        "identity",
+        "optdata",
+    ]
+
+
+def test_a_data_images_directory_without_any_adds_none(
+    tree, tmp_path, fake_veritysetup, caplog
+):
+    empty = tmp_path / "none"
+    empty.mkdir()
+    with caplog.at_level(logging.INFO):
+        build(tree, tmp_path / "out", "--data-images", str(empty))
+    assert "no data images in" in caplog.text
+    assert "data_images" not in json.loads((tmp_path / "out" / "spec.json").read_text())
+
+
+def test_a_tree_reached_through_a_symlink_is_the_tree(tree, tmp_path, fake_veritysetup):
+    """A CI hands the exported rootfs over as a symlink; the image is sized and built
+    from what it points at, not from the link."""
+    link = tmp_path / "rootfs-link"
+    os.symlink(tree, link)
+    direct, linked = tmp_path / "direct", tmp_path / "linked"
+    build(tree, direct)
+    build(link, linked)
+    assert (linked / "rootfs.img").stat().st_size == (
+        direct / "rootfs.img"
+    ).stat().st_size
+    assert (linked / "rootfs.img").read_bytes() == (direct / "rootfs.img").read_bytes()
+
+
+def test_two_builds_of_one_tree_are_one_image(tree, tmp_path, fake_veritysetup):
+    """The filesystem UUID, the superblock times and the directory hash seed are
+    derived, not drawn. A different version is a different image."""
+    first, second = tmp_path / "one", tmp_path / "two"
+    build(tree, first)
+    build(tree, second)
+    a, b = (first / "rootfs.img").read_bytes(), (second / "rootfs.img").read_bytes()
+    assert hashlib.sha256(a).hexdigest() == hashlib.sha256(b).hexdigest()
+    assert (first / "boot.tar").read_bytes() == (second / "boot.tar").read_bytes()
+    (tree / "etc" / "rootfs-version").write_text("1.2.1\n")
+    third = tmp_path / "three"
+    build(tree, third, "--version", "1.2.1")
+    assert (third / "rootfs.img").read_bytes() != a
+
+
+# ------ l4t ------ #
+
+
+@pytest.fixture
+def l4t_tree(tmp_path) -> Path:
+    root = tmp_path / "l4t"
+    (root / "etc").mkdir(parents=True)
+    (root / "etc" / "rootfs-version").write_text("3.0.0\n")
+    (root / "boot").mkdir()
+    (root / "boot" / "Image").write_bytes(b"IMAGE" * 1000)
+    (root / "boot" / "initrd").write_bytes(b"RD" * 1000)
+    (root / "boot" / "tegra234-orin.dtb").write_bytes(b"DTB" * 100)
+    return root
+
+
+def test_the_l4t_boot_blob_and_the_flash_images(l4t_tree, tmp_path, fake_veritysetup):
+    out, flash = tmp_path / "out", tmp_path / "flash"
+    build(l4t_tree, out, "--installer-out", str(flash), platform="l4t")
+    blob = boot_blob(out)
+    assert set(blob) == {"Image", "board.dtb", "cmdline", "initrd"}
+    cmdline = blob["cmdline"].decode()
+    data_size = (out / "rootfs.img").stat().st_size - FAKE_HASH_TREE
+    assert "\n" not in cmdline
+    assert f"verityinfo=/dev/disk/by-partlabel/${{slot}}:{HASH}:{data_size}" in cmdline
+    assert "console=ttyTCU0,115200" in cmdline, "the board's own arguments"
+    assert sorted(p.name for p in flash.iterdir()) == [
+        "board.dtb",
+        "boot_a.img",
+        "boot_b.img",
+        "rootfs.img",
+    ]
+    for slot, part, scratch in (("a", "APP", "scratch_a"), ("b", "APP_b", "scratch_b")):
+        packed = (flash / f"boot_{slot}.img").read_bytes()
+        resolved = bootimg.read_cmdline(packed)
+        assert f"by-partlabel/{part}:{HASH}:" in resolved
+        assert f"by-partlabel/{scratch}:/mnt/rw_overlay" in resolved
+    assert os.path.samefile(flash / "rootfs.img", out / "rootfs.img")
+
+
+def test_the_board_dtb_is_the_one_l4t_keeps_in_boot_dtb(
+    l4t_tree, tmp_path, fake_veritysetup, capsys
+):
+    """A BSP's /boot carries every board variant's DTB and install-platform.sh removes
+    extlinux.conf: the one this board boots is L4T's /boot/dtb/kernel_<board>.dtb."""
+    for variant in ("board-a", "board-b", "board-c"):
+        (l4t_tree / "boot" / f"tegra234-{variant}.dtb").write_bytes(variant.encode())
+    out = refused(
+        capsys, "--platform", "l4t", "--rootfs-dir", str(l4t_tree), "--out",
+        str(tmp_path / "out"), "--version-file", VERSION_FILE,
+    )  # fmt: skip
+    assert "expected one DTB" in out and "found 0 and 4" in out
+    (l4t_tree / "boot" / "dtb").mkdir()
+    (l4t_tree / "boot" / "dtb" / "kernel_tegra234-board-a.dtb").write_bytes(b"board-a")
+    build(l4t_tree, tmp_path / "out", platform="l4t")
+    assert boot_blob(tmp_path / "out")["board.dtb"] == b"board-a"
+
+
+def test_the_firmware_capsule_is_linked_and_named_in_the_spec(
+    l4t_tree, tmp_path, fake_veritysetup
+):
+    cap = tmp_path / "TEGRA_BL_3701.Cap"
+    cap.write_bytes(b"\xed\xd5\xcb\x6d" + b"\x00" * 60)
+    out = tmp_path / "out"
+    build(
+        l4t_tree, out, "--firmware", str(cap), "--firmware-version", "39.2.0",
+        "--firmware-name", "T4-L4T-BSP", platform="l4t",
+    )  # fmt: skip
+    spec = json.loads((out / "spec.json").read_text())
+    assert spec["firmware"] == {
+        "name": "T4-L4T-BSP",
+        "version": "39.2.0",
+        "format": "nvidia-l4t.uefi-capsule.v1",
+        "file": "TEGRA_BL_3701.Cap",
+    }
+    assert (out / "TEGRA_BL_3701.Cap").read_bytes() == cap.read_bytes()
+
+
+@pytest.mark.parametrize(
+    ("extra", "why"),
+    [
+        (["--firmware", "CAP"], "--firmware needs --firmware-version"),
+        (["--firmware-version", "39.2.0"], "--firmware-version without --firmware"),
+        (["--firmware", "MISSING", "--firmware-version", "1"], "no such file"),
+        (
+            [
+                "--firmware",
+                "CAP",
+                "--firmware-version",
+                "1",
+                "--firmware-name",
+                "T4 L4T BSP",
+            ],
+            "--firmware-name may contain only",
+        ),
+    ],
+)
+def test_a_firmware_option_that_cannot_work_is_refused_before_the_image_is_built(
+    l4t_tree, tmp_path, capsys, extra, why
+):
+    """Before the tree is looked at: an argument error should not wait for mkfs."""
+    cap = tmp_path / "x.Cap"
+    cap.write_bytes(b"x")
+    argv = [
+        "--platform", "l4t", "--rootfs-dir", str(l4t_tree), "--out", str(tmp_path / "out"),
+        *[str(cap) if a == "CAP" else str(tmp_path / "none.Cap") if a == "MISSING" else a for a in extra],
+    ]  # fmt: skip
+    assert why in refused(capsys, *argv)
+    assert not (tmp_path / "out" / "rootfs.img").exists()
+
+
+def test_an_l4t_cmdline_that_fits_the_boot_image_is_carried(
+    l4t_tree, tmp_path, fake_veritysetup
+):
+    out = tmp_path / "out"
+    build(l4t_tree, out, "--cmdline", "quiet", platform="l4t")
+    assert boot_blob(out)["cmdline"].decode().endswith(" pci=pcie_bus_perf quiet")
+
+
+def test_an_l4t_cmdline_the_boot_image_cannot_hold_is_refused_before_the_image(
+    l4t_tree, tmp_path, fake_veritysetup, capsys
+):
+    """The board's own arguments fill most of the 511 bytes: a device would refuse to
+    pack this boot image after the download. Refused here, before mkfs."""
+    out = refused(
+        capsys, "--platform", "l4t", "--rootfs-dir", str(l4t_tree), "--out", str(tmp_path / "out"),
+        "--version-file", VERSION_FILE, "--cmdline", "audit=1 audit_backlog_limit=8192",
+    )  # fmt: skip
+    assert "the boot image holds 511" in out
+    assert "leaving" in out and "for --cmdline (32 given)" in out
+    assert not (tmp_path / "out" / "rootfs.img").exists()
+
+
+@pytest.mark.parametrize(
+    ("cmdline", "why"),
+    [
+        ("quiet\nsource /boot/evil.cfg", "one line of arguments"),
+        ("quiet; reboot", "one line of arguments"),
+        ("root=$slot", "one line of arguments"),
+        ("quiet  splash", "one line of arguments"),
+        ("quiet\n", "one line of arguments"),
+        ("verity=0", "may not set verity"),
+        ("quiet root=/dev/sda2 rw", "may not set root, rw"),
+        ("init=/bin/sh", "may not set init"),
+    ],
+)
+def test_a_cmdline_that_would_undo_the_verity_root_is_refused(
+    tree, tmp_path, capsys, cmdline, why
+):
+    """Appended to the composed arguments as it is: a newline or `;` adds a GRUB command,
+    `$` is expanded, and a repeated key wins over the composed one."""
+    out = refused(
+        capsys, "--platform", "grub", "--rootfs-dir", str(tree), "--out", str(tmp_path / "out"),
+        "--version-file", VERSION_FILE, "--cmdline", cmdline,
+    )  # fmt: skip
+    assert why in out
+    assert not (tmp_path / "out" / "rootfs.img").exists()
+
+
+def test_a_cmdline_of_keys_that_only_start_like_composed_ones_is_carried(
+    tree, tmp_path, fake_veritysetup
+):
+    out = tmp_path / "out"
+    build(tree, out, "--cmdline", "rootwait rootdelay=5 panic_on_oops=1 audit=1")
+    assert "panic=10 rootwait rootdelay=5 panic_on_oops=1 audit=1\n" in (
+        boot_blob(out)["grub.cfg"].decode()
+    )
+
+
+def test_firmware_is_l4t_s(tree, tmp_path, capsys):
+    cap = tmp_path / "x.Cap"
+    cap.write_bytes(b"x")
+    out = refused(
+        capsys, "--platform", "grub", "--rootfs-dir", str(tree), "--out", str(tmp_path / "out"),
+        "--firmware", str(cap), "--firmware-version", "1",
+    )  # fmt: skip
+    assert "--firmware is l4t's" in out
+
+
+# ------ a vendor package ------ #
+
+
+def test_a_vendor_package_spec(tmp_path, capsys):
+    pkg = tmp_path / "image.pkg"
+    pkg.write_bytes(b"PKG")
+    out = tmp_path / "out"
+    run(
+        "--vendor-package", str(pkg), "--format", "vendor.package.v1",
+        "--version", "1.0.0", "--out", str(out),
+    )  # fmt: skip
+    spec = json.loads((out / "spec.json").read_text())
+    assert spec["delivery"] == "vendor-package"
+    assert spec["package"] == {"file": "image.pkg", "format": "vendor.package.v1"}
+    assert [p["action"] for p in spec["partitions"]] == [
+        "write",
+        "write",
+        "mkfs",
+        "keep",
+        "keep",
+    ]
+    assert "image" not in spec["partitions"][0]
+    assert (out / "image.pkg").read_bytes() == b"PKG"
+    assert "--format" in refused(
+        capsys, "--vendor-package", str(pkg), "--version", "1.0.0", "--out", str(out)
+    )
+    assert "no --rootfs-dir, --platform" in refused(
+        capsys, "--vendor-package", str(pkg), "--format", "x", "--version", "1.0.0",
+        "--platform", "grub", "--out", str(out),
+    )  # fmt: skip
+    assert "--cmdline: the package is the payload" in refused(
+        capsys, "--vendor-package", str(pkg), "--format", "x", "--version", "1.0.0",
+        "--cmdline", "quiet", "--out", str(out),
+    )  # fmt: skip
+    assert "--platform is required" in refused(
+        capsys, "--rootfs-dir", str(tmp_path), "--version", "1.0.0", "--out", str(out)
+    )
+
+
+# ------ paths in the tree ------ #
+
+
+def test_a_path_in_the_tree_resolves_inside_it(tmp_path):
+    """Symlinks are followed with the tree as `/`, and `..` stops at its root: the
+    result is under the tree whatever the links say."""
+    tree = tmp_path / "tree"
+    (tree / "boot").mkdir(parents=True)
+    (tree / "boot" / "vmlinuz-1").write_bytes(b"K")
+    os.symlink("/boot/vmlinuz-1", tree / "boot" / "vmlinuz")  # absolute, in the tree
+    os.symlink("../../../../boot", tree / "up")  # climbs past the root
+    os.symlink("loop", tree / "loop")
+    root = tree.resolve()
+    assert blobs.resolve_in_tree(tree, "/boot/vmlinuz") == root / "boot" / "vmlinuz-1"
+    assert blobs.resolve_in_tree(tree, "/up/vmlinuz-1") == root / "boot" / "vmlinuz-1"
+    assert blobs.resolve_in_tree(tree, "/../../boot") == root / "boot"
+    with pytest.raises(blobs.BlobBuildError, match="too many levels of symlinks"):
+        blobs.resolve_in_tree(tree, "/loop")
+
+
+def test_a_symlink_leading_out_of_the_tree_names_a_file_in_it(tmp_path):
+    """What a link names outside the tree is looked up inside it: there it is missing,
+    or a directory, and the build refuses it as it would any missing file."""
+    tree = tmp_path / "tree"
+    (tree / "etc").mkdir(parents=True)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("1.0.0\n")
+    os.symlink(str(outside), tree / "etc" / "rootfs-version")
+    assert blobs.tree_file(tree, "/etc/rootfs-version") is None
+    os.symlink("/proc/self/status", tree / "etc" / "status")
+    assert blobs.tree_file(tree, "/etc/status") is None
+    with pytest.raises(blobs.BlobBuildError, match="not in the tree"):
+        blobs.read_version(tree, None, "/etc/rootfs-version")
+
+
+@pytest.mark.parametrize("text", ["1.2.3 rc1\n", "1.2\n.3\n"])
+def test_a_version_file_of_two_words_is_refused(tmp_path, text):
+    """The device reports the whole file stripped: joining the words would give a
+    version it never reports."""
+    tree = tmp_path / "tree"
+    (tree / "etc").mkdir(parents=True)
+    (tree / "etc" / "rootfs-version").write_text(text)
+    with pytest.raises(blobs.BlobBuildError, match="holds 2 words"):
+        blobs.read_version(tree, None, "/etc/rootfs-version")
+    with pytest.raises(blobs.BlobBuildError, match="holds 2 words"):
+        blobs.read_version(tree, "1.2.3rc1", "/etc/rootfs-version")  # the words joined
+    (tree / "etc" / "rootfs-version").write_text(" 1.2.3\n")
+    assert blobs.read_version(tree, None, "/etc/rootfs-version") == "1.2.3"
+
+
+@pytest.fixture
+def board_a(l4t_tree):
+    """An L4T tree as a BSP leaves it: every variant's DTB in /boot, this board's in
+    /boot/dtb, and an extlinux.conf (the platform installer has not run)."""
+    for variant in ("board-a", "board-b"):
+        (l4t_tree / "boot" / f"tegra234-{variant}.dtb").write_bytes(variant.encode())
+    (l4t_tree / "boot" / "dtb").mkdir()
+    (l4t_tree / "boot" / "dtb" / "kernel_tegra234-board-a.dtb").write_bytes(b"board-a")
+    return l4t_tree
+
+
+def extlinux(tree: Path, *fdts: str) -> None:
+    (tree / "boot" / "extlinux").mkdir(exist_ok=True)
+    (tree / "boot" / "extlinux" / "extlinux.conf").write_text(
+        "DEFAULT l0\n"
+        + "".join(
+            f"LABEL l{n}\n  LINUX /boot/Image\n  FDT {f}\n" for n, f in enumerate(fdts)
+        )
+    )
+
+
+def test_an_extlinux_fdt_naming_the_boot_dtb_one_is_taken(board_a):
+    """FDT naming /boot/dtb's DTB, by that path or by a copy of it, agrees with it;
+    a commented FDT, or one with no value, names nothing."""
+    extlinux(
+        board_a, "/boot/dtb/kernel_tegra234-board-a.dtb", "/boot/tegra234-board-a.dtb"
+    )
+    assert blobs.find_l4t_dtb(board_a, None).read_bytes() == b"board-a"
+    (board_a / "boot" / "extlinux" / "extlinux.conf").write_text(
+        "#  FDT /boot/x.dtb\nLABEL l0\n  FDT\n  INITRD /boot/initrd\n"
+    )
+    assert blobs.find_l4t_dtb(board_a, None).read_bytes() == b"board-a"
+
+
+@pytest.mark.parametrize(
+    "fdts, why",
+    [
+        (("/boot/tegra234-board-b.dtb",), "whose content is not"),
+        (
+            ("/boot/dtb/kernel_tegra234-board-a.dtb", "/boot/tegra234-board-b.dtb"),
+            "whose content is not",
+        ),
+        (("/boot/missing.dtb",), "which is not a file in the tree"),
+    ],
+)
+def test_an_extlinux_fdt_naming_another_dtb_is_refused(board_a, fdts, why):
+    """The image boots /boot/dtb's DTB whatever extlinux.conf says: an FDT naming
+    another one, in any entry, or one not in the tree, fails the build."""
+    extlinux(board_a, *fdts)
+    with pytest.raises(blobs.BlobBuildError, match=f"names FDT .*, {why}"):
+        blobs.find_l4t_dtb(board_a, None)
+
+
+def test_with_no_boot_dtb_extlinux_still_chooses_nothing(l4t_tree):
+    """Without /boot/dtb, /boot's only tegra DTB is the one; extlinux.conf neither
+    picks one of several nor overrules the only one."""
+    for variant in ("board-a", "board-b"):
+        (l4t_tree / "boot" / f"tegra234-{variant}.dtb").write_bytes(variant.encode())
+    extlinux(l4t_tree, "/boot/tegra234-board-a.dtb")
+    with pytest.raises(blobs.BlobBuildError, match="found 0 and 3"):
+        blobs.find_l4t_dtb(l4t_tree, None)
+    for variant in ("board-a", "board-b"):
+        (l4t_tree / "boot" / f"tegra234-{variant}.dtb").unlink()
+    (l4t_tree / "boot" / "other.dtb").write_bytes(b"other")
+    extlinux(l4t_tree, "/boot/other.dtb")
+    with pytest.raises(blobs.BlobBuildError, match="whose content is not"):
+        blobs.find_l4t_dtb(l4t_tree, None)
+    extlinux(l4t_tree, "/boot/tegra234-orin.dtb")
+    assert blobs.find_l4t_dtb(l4t_tree, None).name == "tegra234-orin.dtb"
+
+
+def test_a_boot_dtb_entry_that_is_no_file_is_refused(l4t_tree):
+    """A dangling link in /boot/dtb is still this board's DTB, missing: the build
+    fails instead of taking /boot's only tegra DTB, another board's."""
+    (l4t_tree / "boot" / "dtb").mkdir()
+    os.symlink("/boot/gone.dtb", l4t_tree / "boot" / "dtb" / "kernel_tegra234-x.dtb")
+    with pytest.raises(blobs.BlobBuildError, match="is not a file in the tree"):
+        blobs.find_l4t_dtb(l4t_tree, None)
+
+
+def test_dtb_given_is_taken_whatever_extlinux_says(board_a, tmp_path):
+    extlinux(board_a, "/boot/tegra234-board-b.dtb")
+    given = tmp_path / "given.dtb"
+    given.write_bytes(b"given")
+    assert blobs.find_l4t_dtb(board_a, str(given)) == given
+
+
+def test_two_dtbs_in_boot_dtb_are_refused(board_a):
+    """/boot/dtb holding two is not settled by the one tegra*.dtb in /boot."""
+    for name in ("tegra234-board-b.dtb", "tegra234-orin.dtb"):
+        (board_a / "boot" / name).unlink()
+    (board_a / "boot" / "dtb" / "kernel_tegra234-board-b.dtb").write_bytes(b"board-b")
+    with pytest.raises(blobs.BlobBuildError, match="found 2 and 1"):
+        blobs.find_l4t_dtb(board_a, None)
+
+
+@pytest.mark.parametrize("how", ["dotdot", "symlink"])
+def test_an_extlinux_fdt_leading_out_of_the_tree_is_refused(board_a, tmp_path, how):
+    """FDT naming a file outside the tree, by `..` or by a symlink, finds nothing
+    there: the build fails and the build machine's file is never read."""
+    host = tmp_path / "host.dtb"
+    host.write_bytes(b"board-a")  # the same bytes: still not the tree's
+    if how == "dotdot":
+        fdt = "/boot/" + "../" * len(board_a.parts) + str(host).lstrip("/")
+    else:
+        os.symlink(str(host), board_a / "boot" / "board.dtb")
+        fdt = "/boot/board.dtb"
+    extlinux(board_a, fdt)
+    with pytest.raises(blobs.BlobBuildError, match="which is not a file in the tree"):
+        blobs.find_l4t_dtb(board_a, None)
+
+
+def test_the_l4t_boot_files_are_read_through_the_tree(
+    l4t_tree, tmp_path, fake_veritysetup, capsys
+):
+    real = l4t_tree / "boot" / "Image"
+    (l4t_tree / "boot" / "Image-6.8").write_bytes(real.read_bytes())
+    real.unlink()
+    os.symlink("/boot/Image-6.8", real)  # absolute: resolved in the tree
+    build(l4t_tree, tmp_path / "out", platform="l4t")
+    assert boot_blob(tmp_path / "out")["Image"] == b"IMAGE" * 1000
+    real.unlink()
+    os.symlink(str(tmp_path / "out" / "spec.json"), real)  # out of the tree: not there
+    out = refused(
+        capsys, "--platform", "l4t", "--rootfs-dir", str(l4t_tree), "--out",
+        str(tmp_path / "out2"), "--version-file", VERSION_FILE,
+    )  # fmt: skip
+    assert "no kernel" in out
+
+
+def test_a_data_image_given_as_a_symlink_is_refused(tree, tmp_path, fake_veritysetup):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "models.spec.json").write_text("{}")
+    os.symlink(str(tmp_path / "elsewhere.img"), data / "models.img")
+    build(tree, tmp_path / "out")
+    with pytest.raises(blobs.BlobBuildError, match="symlink"):
+        blobs.add_data_images(tmp_path / "out", data)

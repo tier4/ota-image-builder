@@ -22,7 +22,6 @@ from queue import Queue
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 
-import yaml
 from ota_image_libs.common import tmp_fname
 from ota_image_libs.v1.annotation_keys import (
     NVIDIA_JETSON_BSP_VER,
@@ -44,7 +43,7 @@ from ota_image_builder._common import (
     human_readable_size,
 )
 from ota_image_builder._configs import cfg
-from ota_image_builder.cmds._utils import validate_annotations
+from ota_image_builder.cmds._utils import parse_sys_config_specs, validate_annotations
 from ota_image_builder.v1._image_config import (
     AddImageConfigAnnotations,
     compose_image_config,
@@ -121,34 +120,6 @@ def add_image_cmd_args(
         help="The folder of the OTA image we will add new system rootfs image to.",
     )
     add_image_arg_parser.set_defaults(handler=add_image_cmd)
-
-
-def _parse_specs(sys_config_pairs: list[str]) -> dict[str, Path | None]:
-    """Parse and validate the --sys-config args."""
-    sys_config_files: dict[str, Path | None] = {}
-    sys_config_pair: str  # schema: `<ecu_id>:<path_to_syscfg_file>`
-    for sys_config_pair in sys_config_pairs:
-        _ecu_id, _syscfg_fpath = sys_config_pair.split(":", 1)
-        if not _syscfg_fpath:
-            logger.warning(f"No sys_config is defined for ECU {_ecu_id}.")
-            sys_config_files[_ecu_id] = None
-            continue
-
-        _syscfg_fpath = Path(_syscfg_fpath)
-        try:
-            _loaded_sys_cfg = yaml.safe_load(_syscfg_fpath.read_text())
-            assert isinstance(_loaded_sys_cfg, dict), "invalid sys_config file"
-            SysConfig.model_validate(_loaded_sys_cfg)
-            sys_config_files[_ecu_id] = _syscfg_fpath
-        except Exception as e:
-            logger.debug(
-                f"invalid sys_config file {_syscfg_fpath}: {e}",
-                exc_info=e,
-            )
-            exit_with_err_msg(
-                f"sys config file {_syscfg_fpath} is not a valid sys config file: {e}"
-            )
-    return sys_config_files
 
 
 def _add_one_spec(
@@ -289,7 +260,7 @@ def add_image_cmd(args: Namespace) -> None:
         )
         annotations[NVIDIA_JETSON_BSP_VER] = rootfs_bsp_ver
 
-    sys_config_files = _parse_specs(args.sys_config)
+    sys_config_files = parse_sys_config_specs(args.sys_config)
 
     # NOTE: if work_dir is set, use it as the parent of the temporary workdir.
     with TemporaryDirectory(dir=args.tmp_dir) as tmp_workdir:

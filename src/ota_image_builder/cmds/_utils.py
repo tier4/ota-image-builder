@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Literal, overload
 
 import yaml
+from ota_image_libs.v1.image_config.sys_config import SysConfig
 from pydantic import BaseModel, ConfigDict
 
 from ota_image_builder._common import exit_with_err_msg
@@ -103,3 +104,30 @@ def validate_annotations(
             f"Annotations file {annotations_file} is not a valid annotations file: {e}"
         )
     return _verified.model_dump()
+
+
+def parse_sys_config_specs(sys_config_pairs: list[str]) -> dict[str, Path | None]:
+    """Parse and validate the --sys-config args: `<ecu_id>:[<path_to_syscfg_file>]`."""
+    sys_config_files: dict[str, Path | None] = {}
+    for sys_config_pair in sys_config_pairs:
+        _ecu_id, _syscfg_fpath = sys_config_pair.split(":", 1)
+        if not _syscfg_fpath:
+            logger.warning(f"No sys_config is defined for ECU {_ecu_id}.")
+            sys_config_files[_ecu_id] = None
+            continue
+
+        _syscfg_fpath = Path(_syscfg_fpath)
+        try:
+            _loaded_sys_cfg = yaml.safe_load(_syscfg_fpath.read_text())
+            assert isinstance(_loaded_sys_cfg, dict), "invalid sys_config file"
+            SysConfig.model_validate(_loaded_sys_cfg)
+            sys_config_files[_ecu_id] = _syscfg_fpath
+        except Exception as e:
+            logger.debug(
+                f"invalid sys_config file {_syscfg_fpath}: {e}",
+                exc_info=e,
+            )
+            exit_with_err_msg(
+                f"sys config file {_syscfg_fpath} is not a valid sys config file: {e}"
+            )
+    return sys_config_files

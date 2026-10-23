@@ -53,7 +53,10 @@ RUN set -eux; \
     mkdir -p /mnt /workdir /rootfs /output_dir; \
     apt-get update -qq; \
     apt-get install --no-install-recommends -y \
-        python3; \
+        python3 \
+        e2fsprogs \
+        cryptsetup-bin \
+        squashfs-tools; \
     apt-get clean; \
     rm -rf \
         /root/.cache \
