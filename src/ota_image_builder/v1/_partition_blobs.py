@@ -45,6 +45,7 @@ import tarfile
 from pathlib import Path
 
 from ota_image_libs.v1.partition_image.schema import DeliveryMode, PartitionAction
+from ota_image_tools.libs import bootimg
 
 from ota_image_builder.v1._partition_image import (
     DataImageSpec,
@@ -550,12 +551,6 @@ def check_l4t_cmdline_fits(cmdline: str, cmdline_extra: str) -> None:
     """Refuse a template that, filled in for either slot, does not fit the boot image's
     command line field: the device would refuse to pack it, after the download, with
     the update already announced."""
-    try:
-        from ota_image_tools.libs import bootimg
-    except ImportError as e:
-        raise BlobBuildError(
-            "an l4t payload needs ota_image_tools.libs.bootimg to check its command line"
-        ) from e
     # the slot with the longest labels decides: one blob goes to either
     part, resolved = max(
         (
@@ -750,14 +745,6 @@ def pack_l4t_installer_images(
     """What a flash writes: boot_a.img and boot_b.img (the packed boot images for the
     two kernel partitions), board.dtb and a link to rootfs.img. An update packs its own
     on the device; a flash writes both slots and runs where there is no Python."""
-    # Only this step packs a boot image, so only this step needs the packer: a libs
-    # release without it still serves every other command.
-    try:
-        from ota_image_tools.libs import bootimg
-    except ImportError as e:
-        raise BlobBuildError(
-            "--installer-out needs ota_image_tools.libs.bootimg (ota-image-libs v0.6.0 or later)"
-        ) from e
     installer_out.mkdir(parents=True, exist_ok=True)
     k, r = kernel.read_bytes(), initrd.read_bytes()
     for slot, part, scratch in L4T_SLOT_LABELS:

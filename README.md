@@ -96,7 +96,7 @@ ota-image-builder build-data-images --config data_images.yaml --rootfs-dir rootf
 ota-image-builder prepare-partition-image --platform grub --rootfs-dir rootfs/ --version-file /etc/rootfs-version --out blobs/ --data-images blobs/data/
 #   --version-file: the file in the tree the device reports its version from (the platform installer writes it); or --version <v>
 #   --platform l4t: Image, initrd, the board DTB (--dtb) and a command line template; --installer-out <dir> also
-#   packs the two boot images a flash writes (ota-image-libs v0.6.0 or later: its bootimg packer); --firmware <capsule>
+#   packs the two boot images a flash writes; --firmware <capsule>
 #   --firmware-version <v> names the BSP capsule
 #   --vendor-package <pkg> --format <fmt> --version <v>: a package the platform's own updater applies, no tree, no --platform
 ```
