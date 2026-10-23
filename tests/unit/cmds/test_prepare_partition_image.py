@@ -565,14 +565,25 @@ def test_a_cmdline_of_keys_that_only_start_like_composed_ones_is_carried(
     )
 
 
-def test_firmware_is_l4t_s(tree, tmp_path, capsys):
+def test_firmware_is_not_grub_s(tree, tmp_path, capsys):
     cap = tmp_path / "x.Cap"
     cap.write_bytes(b"x")
     out = refused(
         capsys, "--platform", "grub", "--rootfs-dir", str(tree), "--out", str(tmp_path / "out"),
         "--firmware", str(cap), "--firmware-version", "1",
     )  # fmt: skip
-    assert "--firmware is l4t's" in out
+    assert "--firmware is not grub's" in out
+
+
+def test_the_l4t_firmware_format_is_the_capsule_s(l4t_tree, tmp_path, capsys):
+    cap = tmp_path / "x.Cap"
+    cap.write_bytes(b"x")
+    out = refused(
+        capsys, "--platform", "l4t", "--rootfs-dir", str(l4t_tree), "--out", str(tmp_path / "out"),
+        "--firmware", str(cap), "--firmware-version", "1", "--firmware-format", "other.v1",
+    )  # fmt: skip
+    assert "--firmware-format goes with --vendor-package" in out
+    assert "nvidia-l4t.uefi-capsule.v1" in out
 
 
 # ------ a vendor package ------ #
@@ -601,17 +612,144 @@ def test_a_vendor_package_spec(tmp_path, capsys):
     assert "--format" in refused(
         capsys, "--vendor-package", str(pkg), "--version", "1.0.0", "--out", str(out)
     )
-    assert "no --rootfs-dir, --platform" in refused(
+    assert "takes no --platform: the package is the payload" in refused(
         capsys, "--vendor-package", str(pkg), "--format", "x", "--version", "1.0.0",
         "--platform", "grub", "--out", str(out),
     )  # fmt: skip
-    assert "--cmdline: the package is the payload" in refused(
+    assert "takes no --cmdline, --dtb: the package is the payload" in refused(
         capsys, "--vendor-package", str(pkg), "--format", "x", "--version", "1.0.0",
-        "--cmdline", "quiet", "--out", str(out),
+        "--cmdline", "quiet", "--dtb", "board.dtb", "--out", str(out),
     )  # fmt: skip
     assert "--platform is required" in refused(
         capsys, "--rootfs-dir", str(tmp_path), "--version", "1.0.0", "--out", str(out)
     )
+
+
+MCU_HEX = b":020000040000FA\n:00000001FF\n"
+
+
+@pytest.fixture
+def vendor_package(tmp_path) -> Path:
+    pkg = tmp_path / "vendor-package.tar"
+    pkg.write_bytes(b"DUPKG")
+    return pkg
+
+
+def vendor(pkg: Path, out: Path, *args: str) -> None:
+    run(
+        "--vendor-package", str(pkg), "--format", "example.dupkg.v1", "--out", str(out),
+        *(() if "--version-file" in args else ("--version", "1.0.0")), *args,
+    )  # fmt: skip
+
+
+def test_a_vendor_package_carries_the_firmware_beside_it(vendor_package, tmp_path):
+    """The platform's updater writes the partitions from the package; the firmware the
+    agent stages (the MCU's, on DriveOS) rides in the same payload, in its own format."""
+    hex_file = tmp_path / "MCUA.hex"
+    hex_file.write_bytes(MCU_HEX)
+    out = tmp_path / "out"
+    vendor(
+        vendor_package, out, "--firmware", str(hex_file), "--firmware-version", "1.1.0.0",
+        "--firmware-name", "T4-AD1-MCU-A", "--firmware-format", "example.mcu-hex.v1",
+    )  # fmt: skip
+    spec = json.loads((out / "spec.json").read_text())
+    assert spec["delivery"] == "vendor-package"
+    assert spec["package"] == {
+        "file": "vendor-package.tar",
+        "format": "example.dupkg.v1",
+    }
+    assert spec["firmware"] == {
+        "name": "T4-AD1-MCU-A",
+        "version": "1.1.0.0",
+        "format": "example.mcu-hex.v1",
+        "file": "MCUA.hex",
+    }
+    assert (out / "MCUA.hex").read_bytes() == MCU_HEX
+    assert PartitionPayloadSpec.model_validate(spec).firmware is not None
+
+
+@pytest.mark.parametrize(
+    ("extra", "why"),
+    [
+        (
+            ["--firmware", "HEX", "--firmware-version", "1", "--firmware-name", "mcu"],
+            "--firmware with --vendor-package needs --firmware-format",
+        ),
+        (
+            ["--firmware", "HEX", "--firmware-version", "1", "--firmware-format", "f"],
+            "--firmware with --vendor-package needs --firmware-name",
+        ),
+        (
+            ["--firmware", "HEX", "--firmware-name", "mcu", "--firmware-format", "f"],
+            "--firmware needs --firmware-version",
+        ),
+        (
+            ["--firmware-name", "mcu", "--firmware-format", "f"],
+            "--firmware-name, --firmware-format without --firmware",
+        ),
+    ],
+)
+def test_a_vendor_package_firmware_option_that_cannot_work_is_refused(
+    vendor_package, tmp_path, capsys, extra, why
+):
+    hex_file = tmp_path / "MCUA.hex"
+    hex_file.write_bytes(MCU_HEX)
+    argv = [
+        "--vendor-package", str(vendor_package), "--format", "example.dupkg.v1",
+        "--version", "1.0.0", "--out", str(tmp_path / "out"),
+        *[str(hex_file) if a == "HEX" else a for a in extra],
+    ]  # fmt: skip
+    assert why in refused(capsys, *argv)
+    assert not (tmp_path / "out" / "spec.json").exists()
+
+
+def test_a_vendor_package_s_version_is_read_from_the_tree_it_was_built_from(
+    vendor_package, tree, tmp_path
+):
+    """Read where the platform installer wrote it, inside the tree: a symlink there
+    names the tree's file, never the builder's. Nothing else of the tree is read."""
+    (tree / "etc" / "rootfs-version").unlink()
+    (tree / "srv").mkdir()
+    (tree / "srv" / "version").write_text("2.1.0\n")
+    os.symlink("/srv/version", tree / "etc" / "rootfs-version")
+    out = tmp_path / "out"
+    vendor(
+        vendor_package, out, "--rootfs-dir", str(tree), "--version-file", VERSION_FILE
+    )
+    assert json.loads((out / "spec.json").read_text())["version"] == "2.1.0"
+    assert sorted(p.name for p in out.iterdir()) == ["spec.json", "vendor-package.tar"]
+
+
+def test_a_vendor_package_s_version_must_agree_with_the_tree(
+    vendor_package, tree, tmp_path, capsys
+):
+    out = refused(
+        capsys, "--vendor-package", str(vendor_package), "--format", "example.dupkg.v1",
+        "--out", str(tmp_path / "out"), "--rootfs-dir", str(tree),
+        "--version-file", VERSION_FILE, "--version", "9.9.9",
+    )  # fmt: skip
+    assert "the tree's /etc/rootfs-version says 1.2.0" in out
+
+
+@pytest.mark.parametrize(
+    ("extra", "why"),
+    [
+        (["--version-file", VERSION_FILE], "needs --rootfs-dir"),
+        (
+            ["--rootfs-dir", "TREE", "--version", "1.0.0"],
+            "read for --version-file alone",
+        ),
+        ([], "--vendor-package needs --version, or --rootfs-dir and --version-file"),
+    ],
+)
+def test_a_vendor_package_reads_the_tree_for_its_version_alone(
+    vendor_package, tree, tmp_path, capsys, extra, why
+):
+    argv = [
+        "--vendor-package", str(vendor_package), "--format", "example.dupkg.v1",
+        "--out", str(tmp_path / "out"), *[str(tree) if a == "TREE" else a for a in extra],
+    ]  # fmt: skip
+    assert why in refused(capsys, *argv)
 
 
 # ------ paths in the tree ------ #

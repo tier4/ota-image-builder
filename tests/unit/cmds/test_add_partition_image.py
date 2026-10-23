@@ -522,6 +522,53 @@ class TestFirmware:
         assert config.firmware is None
         assert len(manifest.layers) == 1
 
+    def test_it_rides_beside_a_vendor_package(
+        self, image_root, tmp_path, annotations_file
+    ):
+        """DriveOS: the platform's updater writes the partitions from the package, and
+        the MCU firmware the agent stages is the same payload's firmware entry."""
+        d = tmp_path / "vendor"
+        d.mkdir()
+        (d / "vendor-package.tar").write_bytes(b"dupkg" * 100)
+        (d / "MCUA.hex").write_bytes(FIRMWARE)
+        (d / "spec.json").write_text(
+            json.dumps(
+                {
+                    "delivery": "vendor-package",
+                    "version": "2.0.0",
+                    "package": {
+                        "file": "vendor-package.tar",
+                        "format": "example.dupkg.v1",
+                    },
+                    "firmware": {
+                        "name": "T4-AD1-MCU-A",
+                        "version": "1.1.0.0",
+                        "format": "example.mcu-hex.v1",
+                        "file": "MCUA.hex",
+                    },
+                    "partitions": [
+                        {"name": "rootfs", "action": "write"},
+                        {"name": "identity", "action": "keep"},
+                    ],
+                }
+            )
+        )
+        add_partition_image_cmd(
+            make_args(
+                image_root, d / "spec.json", annotations_file, "thor_a:", compress=True
+            )
+        )
+        _, manifest, config, _ = _rootfs_of(image_root, "thor_a")
+        assert config.delivery == "vendor-package"
+        assert isinstance(config.package, VendorPackageZstdDescriptor)
+        fw = config.firmware
+        assert fw is not None
+        assert (fw.name, fw.version) == ("T4-AD1-MCU-A", "1.1.0.0")
+        assert fw.format == "example.mcu-hex.v1" == fw.package.format
+        assert fw.package.image_digest == "sha256:" + sha256(FIRMWARE).hexdigest()
+        assert manifest.layers == [fw.package, config.package]
+        assert config.labels.image_blobs_count == 2
+
 
 class TestDataImages:
     """A data image rides in the config beside the partitions, stored like a
