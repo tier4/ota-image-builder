@@ -86,6 +86,15 @@ def finalize_cmd_args(
         default=False,
     )
     finalize_cmd_args.add_argument(
+        "--slice-size",
+        type=int,
+        default=cfg.SLICE_SIZE // 1024**2,
+        help="(Advanced) The size in MiB of the slices a large resource is split into; "
+        "a resource larger than twice this size is sliced. Smaller slices let a "
+        "client fetch a large file over several connections, which matters on lossy "
+        "links where one connection gets a fraction of the bandwidth.",
+    )
+    finalize_cmd_args.add_argument(
         "image_root",
         help="The folder which holds an OTA image.",
     )
@@ -162,6 +171,8 @@ def finalize_cmd(args: Namespace) -> None:
     image_root = Path(args.image_root)
     if not check_if_valid_ota_image(image_root):
         exit_with_err_msg(f"{image_root} doesn't hold a valid OTA image.")
+    if args.slice_size < 1:
+        exit_with_err_msg(f"--slice-size must be at least 1 MiB: {args.slice_size}")
 
     index_helper = ImageIndexHelper(image_root)
     logger.info(f"Finalize and optimize OTA image at {image_root} ...")
@@ -242,6 +253,7 @@ def finalize_cmd(args: Namespace) -> None:
                 resource_dir=resource_dir,
                 rst_dbf=_working_rstable,
                 protected_resources=protected_resources,
+                slice_size=args.slice_size * 1024**2,
             ).process()
             logger.info(
                 f"Finish applying slice filter: time cost: {int(time.time() - _start_time)}s"

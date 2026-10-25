@@ -15,15 +15,19 @@
 
 from __future__ import annotations
 
-from argparse import Namespace
+from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
 import pytest
 
+from ota_image_builder.cmds import finalize
 from ota_image_builder.cmds.finalize import (
     _collect_protected_resources_digest,
     finalize_cmd,
+    finalize_cmd_args,
 )
+
+MODULE = finalize.__name__
 
 
 class TestCollectProtectedResourcesDigest:
@@ -89,7 +93,65 @@ class TestFinalizeCmd:
             o_skip_bundle=False,
             o_skip_compression=False,
             o_skip_slice=False,
+            slice_size=32,
         )
 
         with pytest.raises(SystemExit):
             finalize_cmd(args)
+
+    @pytest.mark.parametrize(
+        "argv, expected",
+        (
+            pytest.param([], 32, id="default"),
+            pytest.param(["--slice-size", "4"], 4, id="4MiB"),
+        ),
+    )
+    def test_slice_size_arg(self, argv: list[str], expected: int):
+        parser = ArgumentParser()
+        finalize_cmd_args(parser.add_subparsers())
+
+        args = parser.parse_args(["finalize", *argv, "image_root"])
+
+        assert args.slice_size == expected
+
+    def test_slice_size_reaches_slice_filter(self, tmp_path: Path, mocker):
+        mocker.patch(f"{MODULE}.check_if_valid_ota_image", return_value=True)
+        mocker.patch(f"{MODULE}.ImageIndexHelper")
+        mocker.patch(
+            f"{MODULE}._collect_protected_resources_digest", return_value=set()
+        )
+        mocker.patch(f"{MODULE}.BundleFilterProcesser")
+        mocker.patch(f"{MODULE}.CompressionFilterProcesser")
+        mocker.patch(f"{MODULE}.vacuum_db")
+        rst_descriptor = mocker.patch(f"{MODULE}.ZstdCompressedResourceTableDescriptor")
+        rst_descriptor.add_file_to_resource_dir.return_value.size = 1
+        mocker.patch(f"{MODULE}.count_blobs_in_dir", return_value=(0, 0))
+        slice_filter = mocker.patch(f"{MODULE}.SliceFilterProcesser")
+
+        finalize_cmd(
+            Namespace(
+                image_root=str(tmp_path),
+                tmp_dir=str(tmp_path),
+                o_skip_bundle=False,
+                o_skip_compression=False,
+                o_skip_slice=False,
+                slice_size=4,
+            )
+        )
+
+        assert slice_filter.call_args.kwargs["slice_size"] == 4 * 1024**2
+
+    def test_slice_size_below_one_mib_exits(self, tmp_path: Path, mocker):
+        mocker.patch(f"{MODULE}.check_if_valid_ota_image", return_value=True)
+
+        with pytest.raises(SystemExit):
+            finalize_cmd(
+                Namespace(
+                    image_root=str(tmp_path),
+                    tmp_dir=None,
+                    o_skip_bundle=False,
+                    o_skip_compression=False,
+                    o_skip_slice=False,
+                    slice_size=0,
+                )
+            )
