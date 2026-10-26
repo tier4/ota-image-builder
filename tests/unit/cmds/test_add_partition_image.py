@@ -824,6 +824,7 @@ class TestCompression:
                 o_skip_bundle=False,
                 o_skip_compression=False,
                 o_skip_slice=False,
+                slice_size=32,
             )
         )
         index = ImageIndexHelper(image_root).image_index

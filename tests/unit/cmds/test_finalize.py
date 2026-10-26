@@ -103,7 +103,9 @@ class TestFinalizeCmd:
         "argv, expected",
         (
             pytest.param([], 32, id="default"),
+            pytest.param(["--slice-size", "1"], 1, id="1MiB"),
             pytest.param(["--slice-size", "4"], 4, id="4MiB"),
+            pytest.param(["--slice-size", "32"], 32, id="32MiB"),
         ),
     )
     def test_slice_size_arg(self, argv: list[str], expected: int):
@@ -114,7 +116,21 @@ class TestFinalizeCmd:
 
         assert args.slice_size == expected
 
-    def test_slice_size_reaches_slice_filter(self, tmp_path: Path, mocker):
+    @pytest.mark.parametrize("slice_size", ("0", "-1", "33", "4.5"))
+    def test_slice_size_out_of_range_refused(self, slice_size: str, capsys):
+        parser = ArgumentParser()
+        finalize_cmd_args(parser.add_subparsers())
+
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["finalize", "--slice-size", slice_size, "image_root"])
+
+        assert exc_info.value.code == 2
+        assert "--slice-size" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("slice_size", (1, 4))
+    def test_slice_size_reaches_slice_filter(
+        self, slice_size: int, tmp_path: Path, mocker
+    ):
         mocker.patch(f"{MODULE}.check_if_valid_ota_image", return_value=True)
         mocker.patch(f"{MODULE}.ImageIndexHelper")
         mocker.patch(
@@ -135,23 +151,8 @@ class TestFinalizeCmd:
                 o_skip_bundle=False,
                 o_skip_compression=False,
                 o_skip_slice=False,
-                slice_size=4,
+                slice_size=slice_size,
             )
         )
 
-        assert slice_filter.call_args.kwargs["slice_size"] == 4 * 1024**2
-
-    def test_slice_size_below_one_mib_exits(self, tmp_path: Path, mocker):
-        mocker.patch(f"{MODULE}.check_if_valid_ota_image", return_value=True)
-
-        with pytest.raises(SystemExit):
-            finalize_cmd(
-                Namespace(
-                    image_root=str(tmp_path),
-                    tmp_dir=None,
-                    o_skip_bundle=False,
-                    o_skip_compression=False,
-                    o_skip_slice=False,
-                    slice_size=0,
-                )
-            )
+        assert slice_filter.call_args.kwargs["slice_size"] == slice_size * 1024**2
