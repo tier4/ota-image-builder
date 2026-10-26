@@ -62,8 +62,11 @@ jobs:
       - name: Prepare test system image rootfs
         run: sudo ./tests/e2e/scripts/e2e_build_sys_img.sh ${SYS_IMG_ROOTFS}
       - name: Build OTA image from the input test system image
+        # NOTE: sudo-rs(default sudo since ubuntu 26.04) ignores -E, so pass
+        #       the env vars the script needs explicitly.
         run: |
-          DATA=./tests/data sudo -E ./tests/e2e/scripts/e2e_build_ota_image.sh \
+          sudo DATA=./tests/data CERT_DIR=${CERT_DIR} \
+            ./tests/e2e/scripts/e2e_build_ota_image.sh \
             ./dist/ota-image-builder \
             ${SYS_IMG_ROOTFS} \
             ${OTA_IMAGE_OUTPUT} ${OTA_IMAGE_ARTIFACT}
