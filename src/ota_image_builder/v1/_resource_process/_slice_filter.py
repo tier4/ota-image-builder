@@ -48,9 +48,12 @@ logger = logging.getLogger(__name__)
 
 _global_interrupted = False
 
-Sliced = tuple[ResourceID, dict[Sha256DigestBytes, Size]]
+Sliced = tuple[ResourceID, list[tuple[Sha256DigestBytes, Size]]]
 SliceResult = WriteThreadSafeList[Sliced]
-"""<original_rs_id>, dict[<slice_digest>, <slice_size>]."""
+"""<original_rs_id>, list[(<slice_digest>, <slice_size>)] in the origin's order.
+
+A slice repeats in the list when the origin holds its content more than once.
+"""
 
 
 def _global_shutdown_on_failed(exc: BaseException):
@@ -66,7 +69,7 @@ def _iter_slices(
     _batch: Iterable[Sliced],
 ) -> Generator[tuple[Sha256DigestBytes, Size]]:  # pragma: no cover
     for _sliced in _batch:
-        yield from _sliced[1].items()
+        yield from _sliced[1]
 
 
 def _update_one_batch(rs_orm: ResourceTableORM, batch: Iterable[Sliced]) -> None:
@@ -82,17 +85,17 @@ def _update_one_batch(rs_orm: ResourceTableORM, batch: Iterable[Sliced]) -> None
     )
 
     # get the mapping of slices and resource_id
-    # NOTE: the len will be cfg.SLICE_UPDATE_BATCH_SIZE, which is small.
-    _slices = list(_iter_slices(batch))
+    # NOTE: the distinct slices of cfg.SLICE_UPDATE_BATCH_SIZE origins.
+    _digests = list(dict.fromkeys(_digest for _digest, _ in _iter_slices(batch)))
     # fmt: off
     slices_entries: dict[Sha256DigestBytes, ResourceID] = dict(
         rs_orm.orm_execute(
             gen_sql_stmt(
                 "SELECT", "digest, resource_id",
                 "FROM", rs_orm.orm_table_name,
-                "WHERE", "digest", "IN", f"({','.join(repeat('?', len(_slices)))})"
+                "WHERE", "digest", "IN", f"({','.join(repeat('?', len(_digests)))})"
             ),
-            params=tuple(_slice[0] for _slice in _slices),
+            params=tuple(_digests),
             row_factory=typing.cast(
                 typing.Callable[..., tuple[Sha256DigestBytes, ResourceID]], sqlite3.Row
             ),
@@ -106,7 +109,7 @@ def _update_one_batch(rs_orm: ResourceTableORM, batch: Iterable[Sliced]) -> None
         set_cols_value=(
             ResourceTableManifestTypedDict(
                 filter_applied=SliceFilter(
-                    slices=[slices_entries[_digest] for _digest in _slices],
+                    slices=[slices_entries[_digest] for _digest, _ in _slices],
                 )
             )
             for _, _slices in batch
@@ -166,7 +169,10 @@ class SliceFilterProcesser:
     ) -> None:
         _thread_local = self._thread_local
         _buffer, _buffer_view = _thread_local.buffer, _thread_local.bufferview
-        slices: dict[Sha256DigestBytes, Size] = {}
+        # NOTE: keep every slice in order, repeats included: the origin is the
+        #       concatenation of all of them, and a zero-filled region gives
+        #       the same slice more than once.
+        slices: list[tuple[Sha256DigestBytes, Size]] = []
 
         entry_fpath = self._resource_dir / entry_digest.hex()
         with open(entry_fpath, "rb") as _entry_f:
@@ -177,7 +183,7 @@ class SliceFilterProcesser:
                 _slice_resource_fpath = self._resource_dir / _slice_digest.hex()
                 _slice_resource_fpath.write_bytes(_buffer_view[:_read_len])
 
-                slices[_slice_digest] = _read_len
+                slices.append((_slice_digest, _read_len))
                 return _read_len
 
             while entry_size > self._last_slice_maximum_size:

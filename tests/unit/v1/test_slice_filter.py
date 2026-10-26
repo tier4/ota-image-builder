@@ -20,6 +20,10 @@ from concurrent.futures import Future
 from hashlib import sha256
 from pathlib import Path
 
+from ota_image_libs._resource_filter import SliceFilter
+from ota_image_libs.v1.resource_table.db import ResourceTableDBHelper
+from ota_image_libs.v1.resource_table.schema import ResourceTableManifest
+
 import ota_image_builder.v1._resource_process._slice_filter as sf_module
 from ota_image_builder.v1._resource_process._slice_filter import (
     SliceFilterProcesser,
@@ -217,9 +221,79 @@ class TestSliceFilterProcesser:
         assert len(result[1]) >= 2  # Should have multiple slices
 
         # Verify slice files exist
-        for slice_digest in result[1].keys():
+        for slice_digest, _ in result[1]:
             slice_file = resource_dir / slice_digest.hex()
             assert slice_file.exists()
+
+    def test_process_one_origin_keeps_repeated_slices(self, tmp_path: Path):
+        """A slice that repeats in the origin stays in the list at each place."""
+        resource_dir = tmp_path / "resources"
+        resource_dir.mkdir()
+        processor = SliceFilterProcesser(
+            resource_dir=resource_dir,
+            rst_dbf=tmp_path / "resource_table.db",
+            slice_size=100,
+            protected_resources=set(),
+        )
+        processor._thread_worker_initializer()
+
+        # slices of 150 bytes: zero, B, zero, then the last 100 bytes
+        content = b"\0" * 150 + b"B" * 150 + b"\0" * 150 + b"C" * 100
+        test_digest = sha256(content).digest()
+        (resource_dir / test_digest.hex()).write_bytes(content)
+
+        slice_result = SliceResult()
+        processor._process_one_origin_at_thread(
+            1, test_digest, len(content), slice_result
+        )
+
+        slices = slice_result[0][1]
+        assert [_size for _, _size in slices] == [150, 150, 150, 100]
+        assert slices[0][0] == slices[2][0]
+        assert (
+            b"".join((resource_dir / _d.hex()).read_bytes() for _d, _ in slices)
+            == content
+        )
+
+    def test_process_rebuilds_origin_with_repeated_slices(self, tmp_path: Path):
+        """The resource_table lists a repeated slice once per place it takes."""
+        resource_dir = tmp_path / "resources"
+        resource_dir.mkdir()
+        rst_dbf = tmp_path / "resource_table.db"
+        db_helper = ResourceTableDBHelper(rst_dbf)
+        db_helper.bootstrap_db()
+
+        content = b"\0" * 150 + b"B" * 150 + b"\0" * 150 + b"C" * 100
+        test_digest = sha256(content).digest()
+        (resource_dir / test_digest.hex()).write_bytes(content)
+        with db_helper.get_orm() as orm:
+            orm.orm_insert_entry(
+                ResourceTableManifest(
+                    resource_id=1, digest=test_digest, size=len(content)
+                )
+            )
+
+        SliceFilterProcesser(
+            resource_dir=resource_dir,
+            rst_dbf=rst_dbf,
+            slice_size=100,
+            worker_threads=1,
+            protected_resources=set(),
+        ).process()
+
+        with db_helper.get_orm() as orm:
+            origin = orm.orm_select_entry(resource_id=1)
+            assert isinstance(origin.filter_applied, SliceFilter)
+            slice_ids = origin.filter_applied.list_resource_id()
+            rebuilt = b"".join(
+                (
+                    resource_dir / orm.orm_select_entry(resource_id=_id).digest.hex()
+                ).read_bytes()
+                for _id in slice_ids
+            )
+        assert len(slice_ids) == 4
+        assert slice_ids[0] == slice_ids[2]
+        assert rebuilt == content
 
     def test_lower_bound_calculation(self, tmp_path: Path):
         """Test that lower bound is correctly set to 2 * slice_size."""
@@ -269,7 +343,7 @@ class TestUpdateOneBatch:
 
         # Create a batch with one entry
         slice_digest = sha256(b"test").digest()
-        batch = [(1, {slice_digest: 100})]
+        batch = [(1, [(slice_digest, 100)])]
 
         # Mock orm_execute to return (digest, resource_id) pairs
         mock_orm.orm_execute.return_value = [(slice_digest, 100)]
@@ -293,8 +367,8 @@ class TestUpdateOneBatch:
         slice_digest2 = sha256(b"test2").digest()
         slice_digest3 = sha256(b"test3").digest()
         batch = [
-            (1, {slice_digest1: 100, slice_digest2: 100}),
-            (2, {slice_digest3: 200}),
+            (1, [(slice_digest1, 100), (slice_digest2, 100)]),
+            (2, [(slice_digest3, 200)]),
         ]
 
         # Mock orm_execute to return (digest, resource_id) pairs
@@ -315,5 +389,5 @@ class TestUpdateOneBatch:
         proc._update_batch = 2
         proc._db_helper = mocker.MagicMock()
         one_batch = mocker.patch.object(sf_module, "_update_one_batch")
-        proc._update_db([(1, {}), (2, {}), (3, {})])  # type: ignore[arg-type]
+        proc._update_db([(1, []), (2, []), (3, [])])  # type: ignore[arg-type]
         assert one_batch.call_count == 2
