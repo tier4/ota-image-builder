@@ -31,7 +31,7 @@ pyyaml==6.0.3
     # via
     #   ota-image-builder
     #   ota-image-libs
-simple-sqlite3-orm==0.13.0
+simple-sqlite3-orm @ https://github.com/tier4/simple-sqlite3-orm/releases/download/v0.13.2/simple_sqlite3_orm-0.13.2-py3-none-any.whl
     # via
     #   ota-image-builder
     #   ota-image-libs
