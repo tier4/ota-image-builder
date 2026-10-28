@@ -40,7 +40,14 @@ class ImageBuilderConfig:
     ZSTD_COMPRESSION_LEVEL = 9
     COMPRESSION_MAX_CONCURRENT = COMPRESSION_RESOURCE_SCAN_WORKER_THREADS * 2
 
-    SLICE_SIZE = 32 * 1024**2  # 32MiB
+    # A stored resource larger than twice SLICE_SIZE is sliced into slices of 1.5 times it.
+    # 4MiB (files above 8MiB, in 6MiB slices) lets a client that downloads the slices of a
+    # resource concurrently (otaclient with tier4/ota-client#1066) spread a large file over
+    # its connections on a lossy link; a client that downloads them one after another
+    # applies the image all the same. SLICE_SIZE_MAX, the previous default, is the largest
+    # `finalize --slice-size` takes.
+    SLICE_SIZE = 4 * 1024**2  # 4MiB
+    SLICE_SIZE_MAX = 32 * 1024**2  # 32MiB
     SLICE_CONCURRENT_TASKS = 32
     SLICE_UPDATE_BATCH_SIZE = 16
 

@@ -102,7 +102,7 @@ class TestFinalizeCmd:
     @pytest.mark.parametrize(
         "argv, expected",
         (
-            pytest.param([], 32, id="default"),
+            pytest.param([], 4, id="default"),
             pytest.param(["--slice-size", "1"], 1, id="1MiB"),
             pytest.param(["--slice-size", "4"], 4, id="4MiB"),
             pytest.param(["--slice-size", "32"], 32, id="32MiB"),
