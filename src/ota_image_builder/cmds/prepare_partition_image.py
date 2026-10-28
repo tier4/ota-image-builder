@@ -29,7 +29,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 PLATFORMS = ("grub", "l4t")
+# The CLI's default alone: the name a campaign addresses the firmware by is the
+# caller's to give (--firmware-name), as the device declares it; an l4t build whose
+# caller named none gets this.
 L4T_FIRMWARE_NAME = "l4t-bsp"
+DEFAULT_NAME = "rootfs"
+DEFAULT_PANIC = 10
 
 
 def prepare_partition_image_cmd_args(
@@ -75,8 +80,8 @@ def prepare_partition_image_cmd_args(
     )
     parser.add_argument(
         "--name",
-        default="rootfs",
-        help="What the boot files call the image (the GRUB entry's echo line).",
+        help="What the boot files call the image (the GRUB entry's echo line; "
+        f"default: {DEFAULT_NAME}).",
     )
     parser.add_argument(
         "--kernel",
@@ -103,9 +108,8 @@ def prepare_partition_image_cmd_args(
     parser.add_argument(
         "--panic",
         type=int,
-        default=10,
         help="panic= on the kernel command line: how long the initramfs waits before "
-        "rebooting on failure (0 drops to a shell instead).",
+        f"rebooting on failure (0 drops to a shell instead; default: {DEFAULT_PANIC}).",
     )
     parser.add_argument(
         "--data-images",
@@ -149,12 +153,19 @@ def prepare_partition_image_cmd_args(
     parser.set_defaults(handler=prepare_partition_image_cmd)
 
 
+def _given(*options: tuple[str, object]) -> list[str]:
+    """The names of the options the caller gave, for a message that names them."""
+    return [opt for opt, value in options if value is not None and value != ""]
+
+
 def _check_args(args: Namespace) -> None:
     """Argument errors first: before the tree is looked at and before twenty minutes
     of mkfs."""
-    _check_firmware(args)
+    if args.version and not blobs.NAME_RE.match(args.version):
+        exit_with_err_msg("--version may contain only letters, digits, . _ + -")
     if args.vendor_package:
         _check_vendor_args(args)
+        _check_firmware(args)
         return
     if args.format:
         exit_with_err_msg("--format goes with --vendor-package")
@@ -162,13 +173,14 @@ def _check_args(args: Namespace) -> None:
         exit_with_err_msg("--rootfs-dir is required (or --vendor-package)")
     if not args.platform:
         exit_with_err_msg("--platform is required with --rootfs-dir")
+    _check_firmware(args)
     if args.installer_out and args.platform != "l4t":
         exit_with_err_msg("--installer-out is l4t's: the flash input")
     if args.dtb and args.platform != "l4t":
         exit_with_err_msg("--dtb is l4t's")
-    if not blobs.NAME_RE.match(args.name):
+    if not blobs.NAME_RE.match(args.name or DEFAULT_NAME):
         exit_with_err_msg("--name may contain only letters, digits, . _ + -")
-    if args.panic < 0:
+    if args.panic is not None and args.panic < 0:
         exit_with_err_msg("--panic must be a number of seconds")
     try:
         blobs.check_cmdline_extra(args.cmdline)
@@ -182,17 +194,14 @@ def _check_args(args: Namespace) -> None:
 
 def _check_firmware(args: Namespace) -> None:
     """--firmware and what goes with it, under either delivery: the payload's firmware
-    entry is the same whether the agent writes the partitions or a vendor package does."""
+    entry is the same whether the agent writes the partitions or a vendor package does.
+    Leaves args.firmware_name resolved (the l4t default when the caller named none)."""
     if not args.firmware:
-        given = [
-            opt
-            for opt, value in (
-                ("--firmware-version", args.firmware_version),
-                ("--firmware-name", args.firmware_name),
-                ("--firmware-format", args.firmware_format),
-            )
-            if value
-        ]
+        given = _given(
+            ("--firmware-version", args.firmware_version),
+            ("--firmware-name", args.firmware_name),
+            ("--firmware-format", args.firmware_format),
+        )
         if given:
             exit_with_err_msg(f"{', '.join(given)} without --firmware")
         return
@@ -219,33 +228,43 @@ def _check_firmware(args: Namespace) -> None:
                 "--firmware with --vendor-package needs --firmware-name (what a "
                 "campaign addresses the firmware by)"
             )
+        if not blobs.NAME_RE.match(args.firmware_format):
+            exit_with_err_msg(
+                "--firmware-format may contain only letters, digits, . _ + -"
+            )
     elif args.firmware_format:
         exit_with_err_msg(
             "--firmware-format goes with --vendor-package: l4t's firmware is the UEFI "
             f"capsule ({blobs.L4T_FIRMWARE_FORMAT})"
         )
-    if not blobs.NAME_RE.match(args.firmware_name or L4T_FIRMWARE_NAME):
-        exit_with_err_msg("--firmware-name may contain only letters, digits, . _ + -")
+    else:
+        args.firmware_name = args.firmware_name or L4T_FIRMWARE_NAME
+    try:
+        blobs.check_firmware_name(args.firmware_name)
+    except blobs.BlobBuildError as e:
+        exit_with_err_msg(str(e))
 
 
 def _check_vendor_args(args: Namespace) -> None:
+    """The vendor-package delivery: the package is the payload, and the tree, when
+    given, is read for --version-file alone."""
     if not args.format:
         exit_with_err_msg("--vendor-package takes --format")
+    if not blobs.NAME_RE.match(args.format):
+        exit_with_err_msg("--format may contain only letters, digits, . _ + -")
     # Refused, not dropped: each of these shapes the agent's own boot files or image,
     # and the platform's tooling built those into the package already.
-    given = [
-        opt
-        for opt, value in (
-            ("--platform", args.platform),
-            ("--cmdline", args.cmdline),
-            ("--kernel", args.kernel),
-            ("--initrd", args.initrd),
-            ("--dtb", args.dtb),
-            ("--size", args.size),
-            ("--installer-out", args.installer_out),
-        )
-        if value
-    ]
+    given = _given(
+        ("--platform", args.platform),
+        ("--name", args.name),
+        ("--cmdline", args.cmdline),
+        ("--kernel", args.kernel),
+        ("--initrd", args.initrd),
+        ("--dtb", args.dtb),
+        ("--size", args.size),
+        ("--panic", args.panic),
+        ("--installer-out", args.installer_out),
+    )
     if given:
         exit_with_err_msg(
             f"--vendor-package takes no {', '.join(given)}: the package is the payload"
@@ -310,6 +329,8 @@ def _vendor(args: Namespace, out: Path) -> None:
 
 
 def _direct(args: Namespace, out: Path) -> None:
+    name = args.name or DEFAULT_NAME
+    panic = DEFAULT_PANIC if args.panic is None else args.panic
     # Resolved: a CI hands over its rsync'd export through a symlink, and `du` on a
     # symlink measures the link, which sized the image at 68 MiB for a 1.6 GB tree.
     tree = Path(args.rootfs_dir).resolve()
@@ -347,7 +368,7 @@ def _direct(args: Namespace, out: Path) -> None:
             blobs.l4t_cmdline(
                 "0" * 64,
                 size_mib * 1024 * 1024,
-                panic=args.panic,
+                panic=panic,
                 cmdline_extra=args.cmdline,
             ),
             args.cmdline,
@@ -359,14 +380,14 @@ def _direct(args: Namespace, out: Path) -> None:
     if args.platform == "grub":
         blobs.grub_boot_tar(
             out / "boot.tar", kernel, initrd,
-            name=args.name, version=version, root_hash=root_hash, data_size=data_size,
-            panic=args.panic, cmdline_extra=args.cmdline,
+            name=name, version=version, root_hash=root_hash, data_size=data_size,
+            panic=panic, cmdline_extra=args.cmdline,
         )  # fmt: skip
     else:
         assert dtb is not None
         cmdline = blobs.l4t_boot_tar(
             out / "boot.tar", kernel, initrd, dtb,
-            root_hash=root_hash, data_size=data_size, panic=args.panic, cmdline_extra=args.cmdline,
+            root_hash=root_hash, data_size=data_size, panic=panic, cmdline_extra=args.cmdline,
         )  # fmt: skip
         if args.installer_out:
             blobs.pack_l4t_installer_images(
@@ -379,12 +400,12 @@ def _direct(args: Namespace, out: Path) -> None:
     if args.firmware:
         blobs.add_firmware(
             out,
-            args.firmware_name or L4T_FIRMWARE_NAME,
+            args.firmware_name,
             args.firmware_version,
             blobs.L4T_FIRMWARE_FORMAT,
             Path(args.firmware),
         )
-    logger.info(f"built {args.name} {version} in {out}:")
+    logger.info(f"built {name} {version} in {out}:")
     for f in (img, Path(f"{img}.roothash"), out / "boot.tar", out / "spec.json"):
         logger.info(f"  {f.stat().st_size:>12}  {f}")
     logger.info(

@@ -474,6 +474,33 @@ def test_the_firmware_capsule_is_linked_and_named_in_the_spec(
     assert (out / "TEGRA_BL_3701.Cap").read_bytes() == cap.read_bytes()
 
 
+def test_the_l4t_firmware_name_defaults_to_the_bsp_s(
+    l4t_tree, tmp_path, fake_veritysetup
+):
+    cap = tmp_path / "x.Cap"
+    cap.write_bytes(b"x")
+    out = tmp_path / "out"
+    build(
+        l4t_tree, out, "--firmware", str(cap), "--firmware-version", "39.2.0", platform="l4t"
+    )  # fmt: skip
+    assert json.loads((out / "spec.json").read_text())["firmware"]["name"] == "l4t-bsp"
+
+
+def test_a_firmware_named_like_a_blob_of_the_image_is_refused(
+    l4t_tree, tmp_path, fake_veritysetup, capsys
+):
+    """Two blobs cannot share a file name beside the spec: the second would replace
+    the first under the name the spec gives it."""
+    cap = tmp_path / "cap" / "rootfs.img"
+    cap.parent.mkdir()
+    cap.write_bytes(b"x")
+    out = refused(
+        capsys, "--platform", "l4t", "--rootfs-dir", str(l4t_tree), "--out", str(tmp_path / "out"),
+        "--version-file", VERSION_FILE, "--firmware", str(cap), "--firmware-version", "1",
+    )  # fmt: skip
+    assert "rootfs.img would replace partition rootfs's image" in out
+
+
 @pytest.mark.parametrize(
     ("extra", "why"),
     [
@@ -625,77 +652,73 @@ def test_a_vendor_package_spec(tmp_path, capsys):
     )
 
 
-MCU_HEX = b":020000040000FA\n:00000001FF\n"
+FIRMWARE_HEX = b":020000040000FA\n:00000001FF\n"
+VENDOR_FORMAT = "example.vendor.v1"
 
 
 @pytest.fixture
 def vendor_package(tmp_path) -> Path:
     pkg = tmp_path / "vendor-package.tar"
-    pkg.write_bytes(b"DUPKG")
+    pkg.write_bytes(b"PKG")
     return pkg
 
 
 def vendor(pkg: Path, out: Path, *args: str) -> None:
     run(
-        "--vendor-package", str(pkg), "--format", "example.dupkg.v1", "--out", str(out),
+        "--vendor-package", str(pkg), "--format", VENDOR_FORMAT, "--out", str(out),
         *(() if "--version-file" in args else ("--version", "1.0.0")), *args,
     )  # fmt: skip
 
 
 def test_a_vendor_package_carries_the_firmware_beside_it(vendor_package, tmp_path):
     """The platform's updater writes the partitions from the package; the firmware the
-    agent stages (the MCU's, on DriveOS) rides in the same payload, in its own format."""
-    hex_file = tmp_path / "MCUA.hex"
-    hex_file.write_bytes(MCU_HEX)
+    agent stages rides in the same payload, in the format the caller names."""
+    hex_file = tmp_path / "firmware.hex"
+    hex_file.write_bytes(FIRMWARE_HEX)
     out = tmp_path / "out"
     vendor(
         vendor_package, out, "--firmware", str(hex_file), "--firmware-version", "1.1.0.0",
-        "--firmware-name", "T4-AD1-MCU-A", "--firmware-format", "example.mcu-hex.v1",
+        "--firmware-name", "board-fw", "--firmware-format", "example.firmware.v1",
     )  # fmt: skip
     spec = json.loads((out / "spec.json").read_text())
     assert spec["delivery"] == "vendor-package"
-    assert spec["package"] == {
-        "file": "vendor-package.tar",
-        "format": "example.dupkg.v1",
-    }
+    assert spec["package"] == {"file": "vendor-package.tar", "format": VENDOR_FORMAT}
     assert spec["firmware"] == {
-        "name": "T4-AD1-MCU-A",
+        "name": "board-fw",
         "version": "1.1.0.0",
-        "format": "example.mcu-hex.v1",
-        "file": "MCUA.hex",
+        "format": "example.firmware.v1",
+        "file": "firmware.hex",
     }
-    assert (out / "MCUA.hex").read_bytes() == MCU_HEX
+    assert (out / "firmware.hex").read_bytes() == FIRMWARE_HEX
     assert PartitionPayloadSpec.model_validate(spec).firmware is not None
+
+
+FW = ["--firmware", "HEX", "--firmware-version", "1"]
 
 
 @pytest.mark.parametrize(
     ("extra", "why"),
     [
+        ([*FW, "--firmware-name", "fw"], "--firmware with --vendor-package needs --firmware-format"),
+        ([*FW, "--firmware-format", "f"], "--firmware with --vendor-package needs --firmware-name"),
         (
-            ["--firmware", "HEX", "--firmware-version", "1", "--firmware-name", "mcu"],
-            "--firmware with --vendor-package needs --firmware-format",
-        ),
-        (
-            ["--firmware", "HEX", "--firmware-version", "1", "--firmware-format", "f"],
-            "--firmware with --vendor-package needs --firmware-name",
-        ),
-        (
-            ["--firmware", "HEX", "--firmware-name", "mcu", "--firmware-format", "f"],
+            ["--firmware", "HEX", "--firmware-name", "fw", "--firmware-format", "f"],
             "--firmware needs --firmware-version",
         ),
-        (
-            ["--firmware-name", "mcu", "--firmware-format", "f"],
-            "--firmware-name, --firmware-format without --firmware",
-        ),
+        (["--firmware-name", "fw", "--firmware-format", "f"], "--firmware-name, --firmware-format without --firmware"),
+        ([*FW, "--firmware-name", "fw", "--firmware-format", "f w"], "--firmware-format may contain only"),
+        ([*FW, "--firmware-name", "+fw", "--firmware-format", "f"], "--firmware-name may contain only"),
+        ([*FW, "--firmware-name", "rootfs", "--firmware-format", "f"], "--firmware-name rootfs: that is a partition role"),
+        ([*FW, "--platform", "grub"], "takes no --platform: the package is the payload"),
     ],
-)
+)  # fmt: skip
 def test_a_vendor_package_firmware_option_that_cannot_work_is_refused(
     vendor_package, tmp_path, capsys, extra, why
 ):
-    hex_file = tmp_path / "MCUA.hex"
-    hex_file.write_bytes(MCU_HEX)
+    hex_file = tmp_path / "firmware.hex"
+    hex_file.write_bytes(FIRMWARE_HEX)
     argv = [
-        "--vendor-package", str(vendor_package), "--format", "example.dupkg.v1",
+        "--vendor-package", str(vendor_package), "--format", VENDOR_FORMAT,
         "--version", "1.0.0", "--out", str(tmp_path / "out"),
         *[str(hex_file) if a == "HEX" else a for a in extra],
     ]  # fmt: skip
@@ -703,11 +726,88 @@ def test_a_vendor_package_firmware_option_that_cannot_work_is_refused(
     assert not (tmp_path / "out" / "spec.json").exists()
 
 
+def test_a_firmware_named_like_the_vendor_package_is_refused(
+    vendor_package, tmp_path, capsys
+):
+    """The firmware would replace the package under the name the spec gives both."""
+    fw = tmp_path / "fw" / vendor_package.name
+    fw.parent.mkdir()
+    fw.write_bytes(FIRMWARE_HEX)
+    out = tmp_path / "out"
+    msg = refused(
+        capsys, "--vendor-package", str(vendor_package), "--format", VENDOR_FORMAT,
+        "--version", "1.0.0", "--out", str(out), "--firmware", str(fw),
+        "--firmware-version", "1", "--firmware-name", "fw", "--firmware-format", "f",
+    )  # fmt: skip
+    assert "would replace the vendor package" in msg
+    assert (out / vendor_package.name).read_bytes() == b"PKG"
+    assert "firmware" not in json.loads((out / "spec.json").read_text())
+
+
+def test_a_data_image_named_like_the_vendor_package_is_refused(tmp_path, capsys):
+    pkg = tmp_path / "models.img"
+    pkg.write_bytes(b"PKG")
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "models.img").write_bytes(b"IMG")
+    (data / "models.spec.json").write_text(
+        json.dumps(
+            {
+                "name": "models",
+                "version": "1",
+                "mount": "/opt/models",
+                "image": "models.img",
+            }
+        )
+    )
+    msg = refused(
+        capsys, "--vendor-package", str(pkg), "--format", VENDOR_FORMAT, "--version", "1.0.0",
+        "--out", str(tmp_path / "out"), "--data-images", str(data),
+    )  # fmt: skip
+    assert "models.img would replace the vendor package" in msg
+    assert (tmp_path / "out" / "models.img").read_bytes() == b"PKG"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--name", "n"],
+        ["--kernel", "k"],
+        ["--initrd", "i"],
+        ["--size", "0"],
+        ["--panic", "0"],
+        ["--installer-out", "d"],
+    ],
+)
+def test_a_direct_only_option_is_refused_with_a_vendor_package(
+    vendor_package, tmp_path, capsys, extra
+):
+    """Refused, not dropped: a zero too, since 0 is a value the caller gave."""
+    msg = refused(
+        capsys, "--vendor-package", str(vendor_package), "--format", VENDOR_FORMAT,
+        "--version", "1.0.0", "--out", str(tmp_path / "out"), *extra,
+    )  # fmt: skip
+    assert f"takes no {extra[0]}: the package is the payload" in msg
+
+
+@pytest.mark.parametrize(
+    ("option", "value"), [("--version", "1.0.0 rc1"), ("--format", "x y")]
+)
+def test_a_vendor_package_s_version_and_format_are_one_word(
+    vendor_package, tmp_path, capsys, option, value
+):
+    msg = refused(
+        capsys, "--vendor-package", str(vendor_package), "--format", VENDOR_FORMAT,
+        "--version", "1.0.0", "--out", str(tmp_path / "out"), option, value,
+    )  # fmt: skip
+    assert f"{option} may contain only" in msg
+
+
 def test_a_vendor_package_s_version_is_read_from_the_tree_it_was_built_from(
     vendor_package, tree, tmp_path
 ):
     """Read where the platform installer wrote it, inside the tree: a symlink there
-    names the tree's file, never the builder's. Nothing else of the tree is read."""
+    names the tree's file, never the builder's. No image is built from the tree."""
     (tree / "etc" / "rootfs-version").unlink()
     (tree / "srv").mkdir()
     (tree / "srv" / "version").write_text("2.1.0\n")
@@ -724,7 +824,7 @@ def test_a_vendor_package_s_version_must_agree_with_the_tree(
     vendor_package, tree, tmp_path, capsys
 ):
     out = refused(
-        capsys, "--vendor-package", str(vendor_package), "--format", "example.dupkg.v1",
+        capsys, "--vendor-package", str(vendor_package), "--format", VENDOR_FORMAT,
         "--out", str(tmp_path / "out"), "--rootfs-dir", str(tree),
         "--version-file", VERSION_FILE, "--version", "9.9.9",
     )  # fmt: skip
@@ -739,15 +839,20 @@ def test_a_vendor_package_s_version_must_agree_with_the_tree(
             ["--rootfs-dir", "TREE", "--version", "1.0.0"],
             "read for --version-file alone",
         ),
+        (
+            ["--rootfs-dir", "MISSING", "--version-file", VERSION_FILE],
+            "no such directory",
+        ),
         ([], "--vendor-package needs --version, or --rootfs-dir and --version-file"),
     ],
 )
 def test_a_vendor_package_reads_the_tree_for_its_version_alone(
     vendor_package, tree, tmp_path, capsys, extra, why
 ):
+    paths = {"TREE": str(tree), "MISSING": str(tmp_path / "missing")}
     argv = [
-        "--vendor-package", str(vendor_package), "--format", "example.dupkg.v1",
-        "--out", str(tmp_path / "out"), *[str(tree) if a == "TREE" else a for a in extra],
+        "--vendor-package", str(vendor_package), "--format", VENDOR_FORMAT,
+        "--out", str(tmp_path / "out"), *[paths.get(a, a) for a in extra],
     ]  # fmt: skip
     assert why in refused(capsys, *argv)
 

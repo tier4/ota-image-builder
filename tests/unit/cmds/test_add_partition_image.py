@@ -525,12 +525,12 @@ class TestFirmware:
     def test_it_rides_beside_a_vendor_package(
         self, image_root, tmp_path, annotations_file
     ):
-        """DriveOS: the platform's updater writes the partitions from the package, and
-        the MCU firmware the agent stages is the same payload's firmware entry."""
+        """The platform's updater writes the partitions from the package; the firmware
+        the agent stages is the same payload's firmware entry."""
         d = tmp_path / "vendor"
         d.mkdir()
-        (d / "vendor-package.tar").write_bytes(b"dupkg" * 100)
-        (d / "MCUA.hex").write_bytes(FIRMWARE)
+        (d / "vendor-package.tar").write_bytes(b"vendor" * 100)
+        (d / "firmware.hex").write_bytes(FIRMWARE)
         (d / "spec.json").write_text(
             json.dumps(
                 {
@@ -538,13 +538,13 @@ class TestFirmware:
                     "version": "2.0.0",
                     "package": {
                         "file": "vendor-package.tar",
-                        "format": "example.dupkg.v1",
+                        "format": "example.vendor.v1",
                     },
                     "firmware": {
-                        "name": "T4-AD1-MCU-A",
+                        "name": "board-fw",
                         "version": "1.1.0.0",
-                        "format": "example.mcu-hex.v1",
-                        "file": "MCUA.hex",
+                        "format": "example.firmware.v1",
+                        "file": "firmware.hex",
                     },
                     "partitions": [
                         {"name": "rootfs", "action": "write"},
@@ -563,8 +563,8 @@ class TestFirmware:
         assert isinstance(config.package, VendorPackageZstdDescriptor)
         fw = config.firmware
         assert fw is not None
-        assert (fw.name, fw.version) == ("T4-AD1-MCU-A", "1.1.0.0")
-        assert fw.format == "example.mcu-hex.v1" == fw.package.format
+        assert (fw.name, fw.version) == ("board-fw", "1.1.0.0")
+        assert fw.format == "example.firmware.v1" == fw.package.format
         assert fw.package.image_digest == "sha256:" + sha256(FIRMWARE).hexdigest()
         assert manifest.layers == [fw.package, config.package]
         assert config.labels.image_blobs_count == 2

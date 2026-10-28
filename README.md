@@ -98,7 +98,7 @@ ota-image-builder prepare-partition-image --platform grub --rootfs-dir rootfs/ -
 #   --platform l4t: Image, initrd, the board DTB (--dtb) and a command line template; --installer-out <dir> also
 #   packs the two boot images a flash writes; --firmware <capsule>
 #   --firmware-version <v> names the BSP capsule
-#   --vendor-package <pkg> --format <fmt>: a package the platform's own updater applies (a DriveOS dupkg), no --platform;
+#   --vendor-package <pkg> --format <fmt>: a package the platform's own updater applies, no --platform;
 #   the version from --version, or from --version-file in the tree the package was built from (--rootfs-dir, read for nothing else);
 #   --firmware <pkg> --firmware-version <v> --firmware-name <n> --firmware-format <fmt> carries firmware beside it
 ```
@@ -200,7 +200,7 @@ What boots before any partition image is read -- the bootloader chain and the fi
              "file": "firmware.pkg", "requires": {"rootfs": {"min": "2.2.0"}}}
 ```
 
-`format` is opaque here; an agent applies the formats its platform takes and refuses the rest. `prepare-partition-image` names the L4T capsule's itself (`--platform l4t --firmware`); beside a vendor package, whose updater the tool does not know, the caller names it (`--firmware-format`) along with the entry's name (`--firmware-name`). Firmware is slotted with the boot chain where it is slotted at all, so on a platform whose rootfs slot follows the boot chain a firmware update is also a slot switch: the payload carries the slot roles too, if only as a block diff that copies the committed slot. `--data-only` drops it along with the partitions.
+`format` is opaque here; an agent applies the formats its platform takes and refuses the rest. `prepare-partition-image` names the L4T capsule's format itself (`--platform l4t --firmware`); beside a vendor package, whose updater the tool does not know, the caller names it (`--firmware-format`) along with the entry's name (`--firmware-name`). Firmware is slotted with the boot chain where it is slotted at all, so on a platform whose rootfs slot follows the boot chain a firmware update is also a slot switch: the payload carries the slot roles too, if only as a block diff that copies the committed slot. `--data-only` drops it along with the partitions.
 
 ### Subcommands
 
