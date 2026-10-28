@@ -31,7 +31,7 @@ dependencies = [
     #   introduced via dep specified by wheel package.
     # based on ota-image-libs deps, add more restrictions to version range.
     "cryptography>=50,<51",
-    "msgpack>=1.1,<2",
+    "msgpack>=1.2.3,<2",
     "pydantic>=2.10,<3",
     "pyjwt>=2.15,<2.16",
     "pyyaml==6.0.3",
