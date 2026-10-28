@@ -86,11 +86,12 @@ def finalize_cmd_args(
         default=False,
     )
     _default_slice_size = cfg.SLICE_SIZE // 1024**2
+    _max_slice_size = cfg.SLICE_SIZE_MAX // 1024**2
     finalize_cmd_args.add_argument(
         "--slice-size",
         type=int,
-        choices=range(1, _default_slice_size + 1),
-        metavar=f"1..{_default_slice_size}",
+        choices=range(1, _max_slice_size + 1),
+        metavar=f"1..{_max_slice_size}",
         default=_default_slice_size,
         help="(Advanced) Slice a stored resource larger than twice this size in MiB "
         "into slices of 1.5 times this size, the last one smaller "
