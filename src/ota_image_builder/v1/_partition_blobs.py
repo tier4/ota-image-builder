@@ -67,6 +67,7 @@ TAR_MTIME = 946684800
 """2000-01-01T00:00:00Z: every member of a boot files tar."""
 VERITY_BLOCK = 4096
 KEPT_ROLES = ("identity", "optdata")
+PARTITION_ROLES = ("rootfs", "boot", "scratch", *KEPT_ROLES)
 L4T_FIRMWARE_FORMAT = "nvidia-l4t.uefi-capsule.v1"
 """The one format the L4T agent applies: a UEFI capsule for the bootloader chain."""
 L4T_ARGS = (
@@ -846,7 +847,13 @@ def add_data_images(out: Path, data_dir: Path) -> int:
                 f"--data-images: no {img} beside {entry_path} (build-data-images writes them)"
             )
         entry = DataImageSpec.model_validate_json(entry_path.read_text())
-        _link_or_copy(img, out / f"{entry.name}.img")
+        img_name = f"{entry.name}.img"
+        claimed = _files_beside_spec(spec).get(img_name)
+        if claimed and claimed != f"data image {entry.name}":
+            raise BlobBuildError(
+                f"--data-images: {img_name} would replace {claimed} beside the spec"
+            )
+        _link_or_copy(img, out / img_name)
         spec.data_images = [d for d in spec.data_images if d.name != entry.name] + [
             entry
         ]
@@ -858,8 +865,37 @@ def add_data_images(out: Path, data_dir: Path) -> int:
     return n
 
 
+def _files_beside_spec(spec: PartitionPayloadSpec) -> dict[str, str]:
+    """Every file name the spec already claims beside itself, by what claims it: a
+    blob landing under one of these names would replace that file."""
+    taken = {"spec.json": "the spec"}
+    for p in spec.partitions:
+        if p.image:
+            taken[p.image] = f"partition {p.name}'s image"
+    for d in spec.data_images:
+        taken[d.image] = f"data image {d.name}"
+    if spec.package:
+        taken[spec.package.file] = "the vendor package"
+    if spec.firmware:
+        taken[spec.firmware.file] = "the firmware"
+    return taken
+
+
+def check_firmware_name(name: str) -> None:
+    """What the device files the firmware's state under and what `requires` keys name
+    it by: a directory name, as a data image's, and not a partition role."""
+    if not DATA_IMAGE_NAME_RE.match(name):
+        raise BlobBuildError(
+            "--firmware-name may contain only letters, digits, . _ - (64 at most, "
+            "starting with a letter or digit)"
+        )
+    if name in PARTITION_ROLES:
+        raise BlobBuildError(f"--firmware-name {name}: that is a partition role")
+
+
 def add_firmware(out: Path, name: str, version: str, fmt: str, file: Path) -> None:
-    """The platform firmware's package (on L4T the UEFI capsule), copied beside the
+    """The platform firmware's package (on L4T the UEFI capsule; beside a vendor
+    package, whatever the caller names with --firmware-format), copied beside the
     spec and named as the payload's `firmware` entry."""
     if not file.is_file():
         raise BlobBuildError(f"--firmware: no such file: {file}")
@@ -867,12 +903,15 @@ def add_firmware(out: Path, name: str, version: str, fmt: str, file: Path) -> No
         raise BlobBuildError(
             "--firmware needs --firmware-version (what the firmware will report, e.g. 39.2.0)"
         )
-    if not NAME_RE.match(name):
+    check_firmware_name(name)
+    spec = load_spec(out)
+    claimed = _files_beside_spec(spec).get(file.name)
+    if claimed and claimed != "the firmware":
         raise BlobBuildError(
-            "--firmware-name may contain only letters, digits, . _ + -"
+            f"--firmware {file.name} would replace {claimed} beside the spec: name the "
+            "file differently"
         )
     _link_or_copy(file, out / file.name)
-    spec = load_spec(out)
     spec.firmware = FirmwareSpec(name=name, version=version, format=fmt, file=file.name)
     write_spec(out, spec)
     logger.info(
