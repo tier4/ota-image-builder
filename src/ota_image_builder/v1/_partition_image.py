@@ -612,14 +612,18 @@ def add_payload_blobs(
     compressor = block_diff.compressor(zstd_level) if compress else None
     entries: list[PartitionEntry] = []
     for p in spec.partitions:
-        if p.action != PartitionAction.write:
+        if p.action == PartitionAction.keep:
             entries.append(PartitionEntry(name=p.name, action=p.action))
         elif spec.delivery == DeliveryMode.vendor_package:
+            # the package owns the slot: what it does not write it formats (a scratch
+            # mkfs too), and the agent touches no partition beside it
             entries.append(
                 PartitionEntry(
                     name=p.name, action=p.action, performed_by=ActionPerformer.package
                 )
             )
+        elif p.action == PartitionAction.mkfs:
+            entries.append(PartitionEntry(name=p.name, action=p.action))
         else:
             assert p.image is not None
             entries.append(
