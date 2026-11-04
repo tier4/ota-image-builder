@@ -927,6 +927,7 @@ class TestCompression:
                     "partitions": [
                         {"name": "rootfs", "action": "write"},
                         {"name": "boot", "action": "write"},
+                        {"name": "scratch", "action": "mkfs"},
                         {"name": "identity", "action": "keep"},
                     ],
                 }
@@ -950,6 +951,10 @@ class TestCompression:
         assert all(
             p.performed_by == ActionPerformer.package for p in config.written_partitions
         )
+        # the package formats the scratch as well; what is kept stays the agent's to keep
+        scratch, identity = config.partition("scratch"), config.partition("identity")
+        assert scratch is not None and scratch.performed_by == ActionPerformer.package
+        assert identity is not None and identity.performed_by == ActionPerformer.agent
         assert config.sys_config is None
         assert manifest.layers == [config.package]
 
