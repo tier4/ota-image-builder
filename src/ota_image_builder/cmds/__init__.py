@@ -15,6 +15,7 @@
 from .add_image import add_image_cmd_args
 from .add_otaclient_package import add_otaclient_package_cmd_args
 from .add_otaclient_package_compat import add_otaclient_package_compat_cmd_args
+from .add_parameter_set import add_parameter_set_cmd_args
 from .add_partition_image import add_partition_image_cmd_args
 from .add_update_agent_package import add_update_agent_package_cmd_args
 from .aws_kms_sign import (
@@ -37,6 +38,7 @@ __all__ = [
     "build_exclude_cfg_cmd_args",
     "add_image_cmd_args",
     "add_partition_image_cmd_args",
+    "add_parameter_set_cmd_args",
     "sign_cmd_args",
     "sign_with_aws_kms_prepare_cmd_args",
     "sign_with_aws_kms_finish_cmd_args",

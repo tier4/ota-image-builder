@@ -17,6 +17,8 @@ The builder converts a system rootfs into an optimized OTA image (a **file-based
 
 It also adds **partition-based** payloads (`add-partition-image`): whole partition images, data images, a firmware package or a vendor package that the platform's tooling produced, described by a spec JSON, stored zstd-compressed and optionally as block diffs against a previous build. `finalize` leaves these blobs as stored. The schemas are `ota_image_libs.v1.partition_image`, the delta codec `ota_image_tools.libs.block_diff`; the README describes the spec JSON.
 
+It also declares a base's **parameter slots** (`add-image --parameter-slots`) and builds **parameter images** (`add-parameter-set`): per ECU, the layer of those slots' directories made for one base payload, which a device lays over the running base. The format and the layer writer are `ota_image_libs.v1.parameter_set`; `finalize` leaves the layer as stored.
+
 ## Commands for Dev
 
 This project uses [uv](https://docs.astral.sh/uv/) for project management, dependency management, and virtualenv management.

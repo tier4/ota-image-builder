@@ -24,6 +24,7 @@ from ota_image_libs.common import tmp_fname
 from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 from ota_image_libs.v1.image_manifest.schema import ImageManifest
 from ota_image_libs.v1.otaclient_package.schema import OTAClientPackageManifest
+from ota_image_libs.v1.parameter_set.schema import ParameterSetManifest
 from ota_image_libs.v1.partition_image.schema import PartitionImageManifest
 from ota_image_libs.v1.resource_table.schema import (
     ZstdCompressedResourceTableDescriptor,
@@ -113,6 +114,7 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
     1. image_payload: sys_config and file_table files.
     2. update agent release package: its bundles.
     3. resource_table itself.
+    4. a parameter set: its config and its layer.
 
     NOTE(20251219): an example case is when the system image is dev build, and contains
                     the pilot-auto source code within the built system image.
@@ -167,6 +169,14 @@ def _collect_protected_resources_digest(_index_helper: ImageIndexHelper) -> set[
             _config = _manifest.config.load_metafile_from_resource_dir(_resource_dir)
             if _sys_config_descriptor := _config.sys_config:
                 _res.add(_sys_config_descriptor.digest.digest)
+        elif isinstance(manifest_descriptor, ParameterSetManifest.Descriptor):
+            # the layer is applied as the OCI layer it is (spec: parameter_set.md)
+            _manifest = manifest_descriptor.load_metafile_from_resource_dir(
+                _resource_dir
+            )
+            _res.add(_manifest.config.digest.digest)
+            for _layer in _manifest.layers:
+                _res.add(_layer.digest.digest)
     return _res
 
 
@@ -192,10 +202,11 @@ def finalize_cmd(args: Namespace) -> None:
                 "The OTA image has no image payload, "
                 "please add at least one image payload into the OTA image."
             )
-        # only partition-based payloads: their blobs are stored as they are and
-        #   there is no resource_table to optimize; finalize the index as it is
+        # only partition-based payloads or parameter sets: their blobs are stored
+        #   as they are and there is no resource_table to optimize; finalize the
+        #   index as it is
         logger.info(
-            "No resource_table (partition-based payloads only): "
+            "No resource_table (partition-based payloads or parameter sets only): "
             "nothing to optimize, finalizing the OTA image as it is."
         )
         total_blobs_count, total_blobs_size = count_blobs_in_dir(resource_dir)

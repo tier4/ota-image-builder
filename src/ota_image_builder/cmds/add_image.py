@@ -33,6 +33,7 @@ from ota_image_libs.v1.image_config.schema import ImageConfig
 from ota_image_libs.v1.image_config.sys_config import SysConfig
 from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 from ota_image_libs.v1.image_manifest.schema import ImageManifest, OTAReleaseKey
+from ota_image_libs.v1.parameter_set.slots import ParameterSlot
 from ota_image_libs.v1.resource_table.schema import ResourceTableDescriptor
 
 from ota_image_builder._common import (
@@ -51,6 +52,11 @@ from ota_image_builder.v1._image_config import (
 from ota_image_builder.v1._image_manifest import (
     AddImageManifestAnnotations,
     compose_image_manifest,
+)
+from ota_image_builder.v1._parameter_set import (
+    ParameterSetError,
+    check_slots_in_rootfs,
+    load_parameter_slots,
 )
 from ota_image_builder.v1._resource_process._db_utils import (
     DataBaseBuilder,
@@ -116,6 +122,12 @@ def add_image_cmd_args(
         "If not set, OTA image builder will setup a temporary workdir by itself.",
     )
     add_image_arg_parser.add_argument(
+        "--parameter-slots",
+        help="A YAML or JSON list of the parameter slots this payload declares, each "
+        "`{name, path, apply}`: the directories a parameter set may replace, whose "
+        "default contents the rootfs ships (spec: parameter_set.md).",
+    )
+    add_image_arg_parser.add_argument(
         "image_root",
         help="The folder of the OTA image we will add new system rootfs image to.",
     )
@@ -128,6 +140,7 @@ def _add_one_spec(
     sys_config: Path | None,
     resource_dir: Path,
     annotations: dict[str, Any],
+    parameter_slots: list[ParameterSlot] | None = None,
 ) -> ImageManifest.Descriptor:
     """For multi-spec OTA image, add one spec into the OTA image."""
     sys_config_descriptor = None
@@ -141,6 +154,7 @@ def _add_one_spec(
         file_table_descriptor=file_table_descriptor,
         sys_config_descriptor=sys_config_descriptor,
         annotations=annotations,
+        parameter_slots=parameter_slots,
     )
     image_config_descriptor = ImageConfig.Descriptor.export_metafile_to_resource_dir(
         meta_file=image_config,
@@ -262,6 +276,15 @@ def add_image_cmd(args: Namespace) -> None:
 
     sys_config_files = parse_sys_config_specs(args.sys_config)
 
+    parameter_slots: list[ParameterSlot] = []
+    if args.parameter_slots:
+        try:
+            parameter_slots = load_parameter_slots(Path(args.parameter_slots))
+            check_slots_in_rootfs(rootfs_path, parameter_slots)
+        except ParameterSetError as e:
+            exit_with_err_msg(str(e))
+        logger.info(f"Parameter slots: {[_s.name for _s in parameter_slots]}")
+
     # NOTE: if work_dir is set, use it as the parent of the temporary workdir.
     with TemporaryDirectory(dir=args.tmp_dir) as tmp_workdir:
         logger.debug(f"Using temporary workdir: {tmp_workdir}")
@@ -309,6 +332,7 @@ def add_image_cmd(args: Namespace) -> None:
                 sys_config=_sys_config,
                 resource_dir=resource_dir,
                 annotations=_annotations,
+                parameter_slots=parameter_slots,
             )
             index_helper.image_index.add_image(image_manifest_descriptor)
 
