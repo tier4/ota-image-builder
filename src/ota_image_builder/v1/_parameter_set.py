@@ -42,6 +42,7 @@ from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 from ota_image_libs.v1.image_manifest.schema import ImageIdentifier, ImageManifest
 from ota_image_libs.v1.parameter_set.layer import write_parameter_layer
 from ota_image_libs.v1.parameter_set.schema import (
+    VERSION,
     EmptyDescriptor,
     FileBasedSubjectDescriptor,
     ParameterLayerDescriptor,
@@ -51,9 +52,10 @@ from ota_image_libs.v1.parameter_set.schema import (
     SubjectDescriptor,
 )
 from ota_image_libs.v1.parameter_set.slots import (
+    SLOT_NAME,
     ParameterSlot,
     ParameterSlotRef,
-    check_slots_disjoint,
+    check_base_slots,
 )
 from ota_image_libs.v1.partition_image.schema import (
     PartitionImageConfig,
@@ -79,7 +81,7 @@ def load_parameter_slots(slots_file: Path) -> list[ParameterSlot]:
     try:
         _raw = yaml.safe_load(slots_file.read_text())
         _slots = TypeAdapter(list[ParameterSlot]).validate_python(_raw)
-        check_slots_disjoint(str(slots_file), _slots)
+        check_base_slots(str(slots_file), _slots)
     except Exception as e:
         raise ParameterSetError(f"invalid parameter slots in {slots_file}: {e}") from e
     return _slots
@@ -87,9 +89,15 @@ def load_parameter_slots(slots_file: Path) -> list[ParameterSlot]:
 
 def check_slots_in_rootfs(rootfs: Path, slots: list[ParameterSlot]) -> None:
     """The base ships each slot's defaults: its directory is in the rootfs, a real one."""
+    _root = os.path.realpath(rootfs)
     for _slot in slots:
         _dir = rootfs / _slot.relpath
-        if _dir.is_symlink() or not _dir.is_dir():
+        # a link on the way would be followed on the build machine, out of the tree
+        if os.path.realpath(_dir) != os.path.join(_root, _slot.relpath):
+            raise ParameterSetError(
+                f"slot {_slot.name!r}: {_slot.path} is behind a symbolic link in {rootfs}"
+            )
+        if not _dir.is_dir():
             raise ParameterSetError(
                 f"slot {_slot.name!r}: {_slot.path} is not a directory in {rootfs}; "
                 "the base ships the slot's default contents there"
@@ -222,6 +230,14 @@ def add_parameter_set(
     entry to `index`. Raises ParameterSetError for inputs that make no valid set."""
     _refs = [ParameterSlotRef(name=_s.name, path=_s.path) for _s in slots]
     _layers: list[ParameterLayerDescriptor | EmptyDescriptor]
+    # what refuses the set is checked before anything is written: a blob written for
+    #   a set that is then refused would stay in the image, referenced by nothing
+    if not SLOT_NAME.fullmatch(name):
+        raise ParameterSetError(f"set name {name!r} is not a valid name")
+    if not VERSION.fullmatch(version):
+        raise ParameterSetError(f"set version {version!r} is not a valid version")
+    if index.find_image_payload(image_id) is not None:
+        raise ParameterSetError(f"the image already carries a payload for {image_id}")
     try:
         if _refs:
             if rootfs is None:

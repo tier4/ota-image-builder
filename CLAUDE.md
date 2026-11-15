@@ -94,6 +94,7 @@ The builder provides the following subcommands (registered in `main.py`):
 | `build-exclude-cfg` | `build_exclude_cfg.py` | Build exclusion glob pattern files |
 | `add-image` | `add_image.py` | Add system image to OTA image (core operation — processes rootfs, creates file_table, resource_table, manifests) |
 | `add-partition-image` | `add_partition_image.py` | Add a partition-based payload from a spec JSON (composition in `v1/_partition_image.py`) |
+| `add-parameter-set` | `add_parameter_set.py` | Add an ECU's parameter set, made for one base payload, into a parameter image (composition in `v1/_parameter_set.py`) |
 | `add-otaclient-package` | `add_otaclient_package.py` | Add OTAClient release package (never the update agent release package: clients on ota-image-libs < 0.6.0 refuse an index with a manifest kind they do not know) |
 | `add-otaclient-package-compat` | `add_otaclient_package_compat.py` | Legacy OTAClient compatibility |
 | `add-update-agent-package` | `add_update_agent_package.py` | Add update agent bundles (the agent that applies the image) |
@@ -115,6 +116,7 @@ Builder-side logic for composing OTA image v1 metadata and processing resources:
 | `_image_manifest.py` | Image manifest composition per ECU payload |
 | `_image_config.py` | Image config composition with rootfs statistics |
 | `_partition_image.py` | Partition-based payload: the spec JSON, blob storage (compression, block diffs), config and manifest composition |
+| `_parameter_set.py` | Parameter slots of a base (`add-image --parameter-slots`) and parameter set composition |
 | `_resource_process/` | Resource processing pipeline (see below) |
 
 ### Resource Processing Pipeline (`v1/_resource_process/`)

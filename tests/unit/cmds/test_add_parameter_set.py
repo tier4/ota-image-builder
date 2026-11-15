@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 from argparse import Namespace
 from hashlib import sha256
 from pathlib import Path
@@ -53,9 +54,14 @@ from ota_image_libs.v1.parameter_set.schema import (
     check_against_base,
 )
 from ota_image_libs.v1.parameter_set.slots import ParameterSlot
+from ota_image_libs.v1.resource_table.schema import ResourceTableDescriptor
 
+from ota_image_builder.cmds.add_image import add_image_cmd
 from ota_image_builder.cmds.add_parameter_set import add_parameter_set_cmd
-from ota_image_builder.cmds.finalize import finalize_cmd
+from ota_image_builder.cmds.finalize import (
+    _collect_protected_resources_digest,
+    finalize_cmd,
+)
 from ota_image_builder.v1._image_config import compose_image_config
 from ota_image_builder.v1._image_index import init_ota_image
 from ota_image_builder.v1._parameter_set import (
@@ -268,7 +274,8 @@ class TestAddParameterSet:
                 {"empty": True}, "--empty takes no --rootfs", id="empty_and_tree"
             ),
             pytest.param({"ecu_id": "perception"}, "no base payload", id="other_ecu"),
-            pytest.param({"version": "1 0"}, "cannot make", id="bad_version"),
+            pytest.param({"version": "1 0"}, "not a valid version", id="bad_version"),
+            pytest.param({"name": "a set"}, "not a valid name", id="bad_name"),
         ),
     )
     def test_what_makes_no_set_is_refused(
@@ -290,6 +297,75 @@ class TestAddParameterSet:
             ImageIndexHelper(image_root).image_index.find_parameter_set(IMAGE_ID)
             is None
         )
+        assert list((image_root / RESOURCE_DIR).iterdir()) == [], "no blob left over"
+
+    def test_a_second_set_for_the_same_ecu_is_refused_before_writing(
+        self,
+        tmp_path: Path,
+        base: Path,
+        image_root: Path,
+        capsys: pytest.CaptureFixture,
+    ):
+        _tree = make_tree(tmp_path / "tree", PARAMS, LAUNCH)
+        add_parameter_set_cmd(args(image_root, base, rootfs=str(_tree)))
+        _blobs = sorted((image_root / RESOURCE_DIR).iterdir())
+        _other = make_tree(tmp_path / "other", PARAMS, LAUNCH)
+        (_other / PARAMS.relpath / "extra").write_text("changes the layer\n")
+        with pytest.raises(SystemExit):
+            add_parameter_set_cmd(args(image_root, base, rootfs=str(_other)))
+        assert "already carries a payload" in capsys.readouterr().out
+        assert sorted((image_root / RESOURCE_DIR).iterdir()) == _blobs
+
+    def test_a_finalized_image_takes_no_set(
+        self, base: Path, image_root: Path, capsys: pytest.CaptureFixture
+    ):
+        add_parameter_set_cmd(args(image_root, base, empty=True))
+        finalize_cmd(
+            Namespace(
+                image_root=str(image_root),
+                tmp_dir=None,
+                o_skip_bundle=False,
+                o_skip_compression=False,
+                o_skip_slice=False,
+                slice_size=32,
+            )
+        )
+        with pytest.raises(SystemExit):
+            add_parameter_set_cmd(
+                args(image_root, base, empty=True, ecu_id="perception")
+            )
+        assert "finalized" in capsys.readouterr().out
+
+    def test_an_image_with_file_based_payloads_takes_no_set(
+        self, base: Path, image_root: Path, capsys: pytest.CaptureFixture
+    ):
+        """An image with a resource table holds file-based payloads: a parameter
+        image is one of its own."""
+        _helper = ImageIndexHelper(image_root)
+        _helper.image_index.update_resource_table(
+            ResourceTableDescriptor.add_contents_to_resource_dir(
+                b"a resource table", _helper.image_resource_dir
+            )
+        )
+        _helper.sync_index()
+        with pytest.raises(SystemExit):
+            add_parameter_set_cmd(args(image_root, base, empty=True))
+        assert "parameter image of its own" in capsys.readouterr().out
+
+    def test_finalize_keeps_the_sets_config_and_layer_out_of_the_filters(
+        self, tmp_path: Path, base: Path, image_root: Path
+    ):
+        add_parameter_set_cmd(
+            args(
+                image_root,
+                base,
+                rootfs=str(make_tree(tmp_path / "tree", PARAMS, LAUNCH)),
+            )
+        )
+        _manifest, _ = the_set(image_root)
+        _protected = _collect_protected_resources_digest(ImageIndexHelper(image_root))
+        assert _manifest.config.digest.digest in _protected
+        assert _manifest.layers[0].digest.digest in _protected
 
     def test_a_base_without_slots_takes_only_an_empty_set(
         self, tmp_path: Path, image_root: Path, capsys: pytest.CaptureFixture
@@ -307,6 +383,64 @@ class TestAddParameterSet:
         _tree = make_tree(tmp_path / "tree", PARAMS)
         with pytest.raises(SystemExit):
             add_parameter_set_cmd(args(image_root, base, rootfs=str(_tree)))
+        assert list((image_root / RESOURCE_DIR).iterdir()) == []
+
+
+class TestAddImageDeclaresSlots:
+    """`add-image --parameter-slots`, through the command."""
+
+    def add_image(self, tmp_path: Path, rootfs: Path, slots_file: Path) -> Path:
+        _image_root = init_ota_image(tmp_path / "image", {BUILD_TOOL_VERSION: "test"})
+        _annotations = tmp_path / "annotations.yaml"
+        _annotations.write_text(
+            "\n".join(
+                f"{_k}: {json.dumps(_v)}" for _k, _v in CONFIG_ANNOTATIONS.items()
+            )
+            + "\n"
+        )
+        add_image_cmd(
+            Namespace(
+                image_root=str(_image_root),
+                annotations_file=str(_annotations),
+                sys_config=["autoware:"],
+                release_key="dev",
+                rootfs=str(rootfs),
+                tmp_dir=None,
+                parameter_slots=str(slots_file),
+            )
+        )
+        return _image_root
+
+    def slots_file(self, tmp_path: Path) -> Path:
+        _f = tmp_path / "slots.json"
+        _f.write_text(json.dumps([PARAMS.model_dump()]))
+        return _f
+
+    def test_the_slots_land_in_the_image_config(self, tmp_path: Path):
+        _rootfs = make_tree(tmp_path / "rootfs", PARAMS)
+        (_rootfs / "blob").write_bytes(os.urandom(64 * 1024))
+        _image_root = self.add_image(tmp_path, _rootfs, self.slots_file(tmp_path))
+
+        _helper = ImageIndexHelper(_image_root)
+        _manifest = _helper.image_index.find_image(
+            IMAGE_ID
+        ).load_metafile_from_resource_dir(  # type: ignore[union-attr]
+            _helper.image_resource_dir
+        )
+        _config = _manifest.config.load_metafile_from_resource_dir(
+            _helper.image_resource_dir
+        )
+        assert _config.parameter_slots == [PARAMS]
+
+    def test_a_slot_the_rootfs_does_not_ship_stops_the_command(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ):
+        _rootfs = tmp_path / "rootfs"
+        _rootfs.mkdir()
+        (_rootfs / "blob").write_bytes(os.urandom(64 * 1024))
+        with pytest.raises(SystemExit):
+            self.add_image(tmp_path, _rootfs, self.slots_file(tmp_path))
+        assert "not a directory" in capsys.readouterr().out
 
 
 class TestBaseSlots:
