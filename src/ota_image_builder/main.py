@@ -27,6 +27,7 @@ from ota_image_builder.cmds import (
     add_image_cmd_args,
     add_otaclient_package_cmd_args,
     add_otaclient_package_compat_cmd_args,
+    add_parameter_set_cmd_args,
     add_partition_image_cmd_args,
     add_update_agent_package_cmd_args,
     build_annotation_cmd_args,
@@ -105,6 +106,7 @@ def main():
     build_data_images_cmd_args(sub_arg_parser)
     prepare_partition_image_cmd_args(sub_arg_parser)
     add_partition_image_cmd_args(sub_arg_parser)
+    add_parameter_set_cmd_args(sub_arg_parser)
     add_update_agent_package_cmd_args(sub_arg_parser)
     add_otaclient_package_cmd_args(sub_arg_parser)
     add_otaclient_package_compat_cmd_args(sub_arg_parser)

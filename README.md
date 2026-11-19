@@ -202,6 +202,30 @@ What boots before any partition image is read -- the bootloader chain and the fi
 
 `format` is opaque here; an agent applies the formats its platform takes and refuses the rest. `prepare-partition-image` names the L4T capsule's format itself (`--platform l4t --firmware`); beside a vendor package, whose updater the tool does not know, the caller names it (`--firmware-format`) along with the entry's name (`--firmware-name`). Firmware is slotted with the boot chain where it is slotted at all, so on a platform whose rootfs slot follows the boot chain a firmware update is also a slot switch: the payload carries the slot roles too, if only as a block diff that copies the committed slot. `--data-only` drops it along with the partitions.
 
+### Parameter sets
+
+A **parameter image** carries a **parameter set** for an ECU: the files of a few directories of its rootfs (the set's *slots*), delivered on their own and laid over the base the ECU runs, without writing a standby slot (spec: [parameter_set.md](https://github.com/tier4/ota-image-libs/blob/main/spec/parameter_set.md)). The set names the slots it fills, each with what makes a change to it take effect -- an executable of the base, outside every slot, or `reboot`:
+
+```yaml
+# slots.yaml
+- name: individual_params
+  path: /opt/autoware/vehicle/sample_vehicle/individual_params
+  apply: /opt/autoware/vehicle/sample_vehicle/apply.sh   # or: reboot
+```
+
+The set names no base: which base it suits is decided where the release is evaluated, and a device applies it on the base it runs, refusing it when that base lacks a slot's directory or its `apply`. The base declares nothing; its rootfs ships each slot's defaults, which the slot holds when no set fills it. A parameter image is built like any image, with `add-parameter-set` in place of `add-image`; one parameter image per ECU is the usual case:
+
+```bash
+ota-image-builder init --annotations-file annotations.yaml param_image/
+ota-image-builder add-parameter-set --ecu-id autoware --release-key dev \
+    --slots slots.yaml --rootfs /vehicle-overlay-tree --name sample_vehicle --version 6.1.0 param_image/
+ota-image-builder finalize param_image/
+ota-image-builder sign ... param_image/
+ota-image-builder pack-artifact ... param_image/
+```
+
+`--rootfs` holds the slots' directories at their paths (each a real directory, not behind a symbolic link), and the same contents always make the same layer. An empty set (`--empty`, without `--slots` and `--rootfs`) takes away the set applied before: the ECU's slots go back to the base's defaults. A parameter image carries parameter sets only: `add-parameter-set` refuses an image with a file-based or partition-based payload, and `add-image` and `add-partition-image` refuse a parameter image.
+
 ### Subcommands
 
 | Command | Description |
@@ -214,6 +238,7 @@ What boots before any partition image is read -- the bootloader chain and the fi
 | `build-exclude-cfg` | Build exclusion glob pattern files |
 | `add-image` | Add a system image payload (file-based) to the OTA image |
 | `add-partition-image` | Add a partition-based payload: whole partition images or a vendor package, from a spec JSON |
+| `add-parameter-set` | Add a parameter set for one ECU into a parameter image: the slots it fills, with how each takes effect |
 | `add-otaclient-package` | Add an OTAClient release package |
 | `add-update-agent-package` | Add an update agent's bundle(s) as the image's update agent release package (see the note below) |
 | `add-otaclient-package-compat` | Add an OTAClient package in legacy-compatible format |
@@ -224,7 +249,7 @@ What boots before any partition image is read -- the bootloader chain and the fi
 Use `-d`/`--debug` for debug logging.
 Run `ota-image-builder <command> --help` for detailed usage of each subcommand.
 
-**Compatibility note.** A consumer refuses an `index.json` that lists a manifest kind its ota-image-libs does not know, so an image must carry only entries every one of its consumers can read. The update agent release package (`add-update-agent-package`) is known from ota-image-libs 0.6.0 on: an image that otaclient releases before that (v3.14 and earlier) or other tools on an older library must read carries none, and `add-otaclient-package` therefore writes the OTAClient release package only. Partition-based payloads are read as file-based descriptors by older libraries and do not stop them from finding their own payload.
+**Compatibility note.** A consumer refuses an `index.json` that lists a manifest kind its ota-image-libs does not know, so an image must carry only entries every one of its consumers can read. The update agent release package (`add-update-agent-package`) is known from ota-image-libs 0.6.0 on: an image that otaclient releases before that (v3.14 and earlier) or other tools on an older library must read carries none, and `add-otaclient-package` therefore writes the OTAClient release package only. Partition-based payloads are read as file-based descriptors by older libraries and do not stop them from finding their own payload. Parameter sets are known from ota-image-libs 0.7.0 on; a consumer on an older library fails on a parameter image before changing anything: on 0.6.0 it refuses the whole index, before that it fails on its own ECU's manifest.
 
 ## Specification
 
