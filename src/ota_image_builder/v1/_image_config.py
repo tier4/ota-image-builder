@@ -30,7 +30,6 @@ from ota_image_libs.v1.file_table.schema import (
 )
 from ota_image_libs.v1.image_config.schema import ImageConfig
 from ota_image_libs.v1.image_config.sys_config import SysConfig
-from ota_image_libs.v1.parameter_set.slots import ParameterSlot
 from pydantic import Field
 
 from ota_image_builder._common import exit_with_err_msg
@@ -54,7 +53,6 @@ def compose_image_config(
     file_table_descriptor: ZstdCompressedFileTableDescriptor,
     sys_config_descriptor: SysConfig.Descriptor | None = None,
     annotations: dict[str, Any],
-    parameter_slots: list[ParameterSlot] | None = None,
 ) -> ImageConfig:
     try:
         validated_annotations = AddImageConfigAnnotations.model_validate(annotations)
@@ -77,5 +75,4 @@ def compose_image_config(
         sys_config=sys_config_descriptor,
         file_table=file_table_descriptor,
         labels=ImageConfig.Annotations.model_validate(annotations),
-        parameter_slots=parameter_slots or None,
     )

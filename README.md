@@ -204,33 +204,27 @@ What boots before any partition image is read -- the bootloader chain and the fi
 
 ### Parameter sets
 
-A base payload may declare **parameter slots**, directories of its rootfs whose contents can be delivered on their own later (spec: [parameter_set.md](https://github.com/tier4/ota-image-libs/blob/main/spec/parameter_set.md)). The rootfs ships each slot's defaults; `add-image --parameter-slots` names the slots, each with what makes a change to it take effect:
+A **parameter image** carries a **parameter set** for an ECU: the files of a few directories of its rootfs (the set's *slots*), delivered on their own and laid over the base the ECU runs, without writing a standby slot (spec: [parameter_set.md](https://github.com/tier4/ota-image-libs/blob/main/spec/parameter_set.md)). The set names the slots it fills, each with what makes a change to it take effect -- an executable of the base, outside every slot, or `reboot`:
 
 ```yaml
-# parameter_slots.yaml
+# slots.yaml
 - name: individual_params
   path: /opt/autoware/vehicle/vehicle.j6_gen2/individual_params
-  apply: /opt/autoware/bin/apply-parameter-set   # or: reboot
+  apply: /opt/autoware/vehicle/vehicle.j6_gen2/apply.sh   # or: reboot
 ```
 
-```bash
-ota-image-builder add-image ... --parameter-slots parameter_slots.yaml ota_image/
-```
-
-A **parameter image** then carries, per ECU, a parameter set made for exactly that base payload: one layer of the slots' directories, bound to the base by the digest of its manifest, which a device lays over the running base without writing a standby slot or rebooting. It is built like any image, with `add-parameter-set` in place of `add-image`:
+The set names no base: which base it suits is decided where the release is evaluated, and a device applies it on the base it runs, refusing it when that base lacks a slot's directory or its `apply`. The base declares nothing; its rootfs ships each slot's defaults, which the slot holds when no set fills it. A parameter image is built like any image, with `add-parameter-set` in place of `add-image`; one parameter image per ECU is the usual case:
 
 ```bash
 ota-image-builder init --annotations-file annotations.yaml param_image/
-ota-image-builder add-parameter-set --base-image ota_image.zip --ecu-id autoware --release-key dev \
-    --rootfs /vehicle-overlay-tree --name j6_gen2_params --version 2026.10.29-1 param_image/
-ota-image-builder add-parameter-set --base-image ota_image.zip --ecu-id perception --release-key dev \
-    --empty --name j6_gen2_params --version 2026.10.29-1 param_image/
+ota-image-builder add-parameter-set --ecu-id autoware --release-key dev \
+    --slots slots.yaml --rootfs /vehicle-overlay-tree --name j6_gen2 --version 6.1.0 param_image/
 ota-image-builder finalize param_image/
 ota-image-builder sign ... param_image/
 ota-image-builder pack-artifact ... param_image/
 ```
 
-`--rootfs` holds the slots' directories at their paths; by default the set fills every slot the base declares (`--slot` names some), and the same contents always make the same layer. An ECU a release names but whose parameters it does not set gets an empty set (`--empty`), which leaves its slots with the base's defaults. A parameter image carries no file-based payload: the command refuses an image that has one.
+`--rootfs` holds the slots' directories at their paths (each a real directory, not behind a symbolic link), and the same contents always make the same layer. An empty set (`--empty`, without `--slots` and `--rootfs`) takes away the set applied before: the ECU's slots go back to the base's defaults. A parameter image carries no file-based payload: the command refuses an image that has one.
 
 ### Subcommands
 
@@ -244,7 +238,7 @@ ota-image-builder pack-artifact ... param_image/
 | `build-exclude-cfg` | Build exclusion glob pattern files |
 | `add-image` | Add a system image payload (file-based) to the OTA image |
 | `add-partition-image` | Add a partition-based payload: whole partition images or a vendor package, from a spec JSON |
-| `add-parameter-set` | Add an ECU's parameter set, made for one base payload, into a parameter image |
+| `add-parameter-set` | Add a parameter set for one ECU into a parameter image: the slots it fills, with how each takes effect |
 | `add-otaclient-package` | Add an OTAClient release package |
 | `add-update-agent-package` | Add an update agent's bundle(s) as the image's update agent release package (see the note below) |
 | `add-otaclient-package-compat` | Add an OTAClient package in legacy-compatible format |
