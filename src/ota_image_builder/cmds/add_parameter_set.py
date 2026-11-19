@@ -109,11 +109,6 @@ def add_parameter_set_cmd(args: Namespace) -> None:
     image_index = index_helper.image_index
     if image_index.image_finalized or image_index.image_signed:
         exit_with_err_msg("Modifying an already finalized image is NOT allowed, abort!")
-    if image_index.image_resource_table is not None:
-        exit_with_err_msg(
-            "The image carries file-based payloads: a parameter set goes into a "
-            "parameter image of its own."
-        )
 
     if args.empty:
         if args.slots or args.rootfs:
@@ -135,7 +130,8 @@ def add_parameter_set_cmd(args: Namespace) -> None:
             load_parameter_slots(Path(args.slots)) if args.slots else []
         )
         logger.info(
-            f"Will add parameter set {args.name} {args.version} for {image_id}, "
+            f"Will add parameter set {args.name} {args.version} for "
+            f"{args.ecu_id} ({args.release_key}), "
             f"filling {[_s.name for _s in slots] or 'no slot'} ..."
         )
         add_parameter_set(
@@ -148,6 +144,7 @@ def add_parameter_set_cmd(args: Namespace) -> None:
             version=args.version,
         )
     except ParameterSetError as e:
+        logger.debug(f"failed to add the parameter set: {e!r}", exc_info=e)
         exit_with_err_msg(str(e))
 
     index_helper.sync_index()

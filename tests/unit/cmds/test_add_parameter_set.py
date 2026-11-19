@@ -16,12 +16,20 @@
 from __future__ import annotations
 
 import json
+import os
 from argparse import Namespace
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from ota_image_libs.v1.annotation_keys import BUILD_TOOL_VERSION
+from ota_image_libs.v1.annotation_keys import (
+    BUILD_TOOL_VERSION,
+    OTA_RELEASE_KEY,
+    PLATFORM_ECU_ARCH,
+    SYS_IMAGE_BASE_IMAGE,
+)
 from ota_image_libs.v1.consts import RESOURCE_DIR
+from ota_image_libs.v1.image_index.schema import ImageIndex
 from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 from ota_image_libs.v1.image_manifest.schema import ImageIdentifier, OTAReleaseKey
 from ota_image_libs.v1.parameter_set.layer import OPAQUE_WHITEOUT, read_parameter_layer
@@ -32,7 +40,9 @@ from ota_image_libs.v1.parameter_set.schema import (
 from ota_image_libs.v1.parameter_set.slots import ParameterSlot
 from ota_image_libs.v1.resource_table.schema import ResourceTableDescriptor
 
+from ota_image_builder.cmds.add_image import add_image_cmd
 from ota_image_builder.cmds.add_parameter_set import add_parameter_set_cmd
+from ota_image_builder.cmds.add_partition_image import add_partition_image_cmd
 from ota_image_builder.cmds.finalize import (
     _collect_protected_resources_digest,
     finalize_cmd,
@@ -48,12 +58,12 @@ ECU = "autoware"
 IMAGE_ID = ImageIdentifier(ECU, OTAReleaseKey.dev)
 PARAMS = ParameterSlot(
     name="individual_params",
-    path="/opt/autoware/vehicle/vehicle.j6_gen2/individual_params",
-    apply="/opt/autoware/vehicle/vehicle.j6_gen2/apply.sh",
+    path="/opt/autoware/vehicle/sample_vehicle/individual_params",
+    apply="/opt/autoware/vehicle/sample_vehicle/apply.sh",
 )
 LAUNCH = ParameterSlot(
     name="launch",
-    path="/opt/autoware/vehicle/vehicle.j6_gen2/j6_gen2_launch",
+    path="/opt/autoware/vehicle/sample_vehicle/launch",
     apply="reboot",
 )
 
@@ -79,7 +89,7 @@ def args(image_root: Path, **kw) -> Namespace:
         slots=None,
         rootfs=None,
         empty=False,
-        name="j6_gen2",
+        name="sample_vehicle",
         version="6.1.0",
     )
     _a.update(kw)
@@ -99,9 +109,53 @@ def finalize(image_root: Path) -> None:
     )
 
 
-def the_set(image_root: Path) -> tuple[ParameterSetManifest, ParameterSetConfig]:
+def blobs(image_root: Path) -> list[Path]:
+    return sorted((image_root / RESOURCE_DIR).iterdir())
+
+
+def add_vendor_package(image_root: Path, tmp_path: Path, ecu_id: str) -> None:
+    """A partition-based payload for `ecu_id`: the smallest one, a vendor package."""
+    _d = tmp_path / f"vendor_{ecu_id}"
+    _d.mkdir()
+    (_d / "update.pkg").write_bytes(b"opaque" * 100)
+    (_d / "spec.json").write_text(
+        json.dumps(
+            {
+                "delivery": "vendor-package",
+                "version": "1.0.0",
+                "package": {"file": "update.pkg", "format": "example"},
+                "partitions": [{"name": "rootfs", "action": "write"}],
+            }
+        )
+    )
+    _annotations = {
+        SYS_IMAGE_BASE_IMAGE: "ubuntu:24.04",
+        PLATFORM_ECU_ARCH: "x86_64",
+        OTA_RELEASE_KEY: "dev",
+    }
+    (_d / "annotations.yaml").write_text(
+        "".join(f'"{_k}": "{_v}"\n' for _k, _v in _annotations.items())
+    )
+    add_partition_image_cmd(
+        Namespace(
+            image_root=str(image_root),
+            spec=str(_d / "spec.json"),
+            annotations_file=str(_d / "annotations.yaml"),
+            sys_config=[f"{ecu_id}:"],
+            release_key=None,
+            no_compress=True,
+            zstd_level=3,
+            delta_from=[],
+            data_only=False,
+        )
+    )
+
+
+def the_set(
+    image_root: Path, image_id: ImageIdentifier = IMAGE_ID
+) -> tuple[ParameterSetManifest, ParameterSetConfig]:
     _helper = ImageIndexHelper(image_root)
-    _descriptor = _helper.image_index.find_parameter_set(IMAGE_ID)
+    _descriptor = _helper.image_index.find_parameter_set(image_id)
     assert _descriptor is not None
     _manifest = _descriptor.load_metafile_from_resource_dir(_helper.image_resource_dir)
     _config = _manifest.config.load_metafile_from_resource_dir(
@@ -198,6 +252,30 @@ class TestAddParameterSet:
         add_parameter_set_cmd(args(image_root, empty=True))
         _manifest, _config = the_set(image_root)
         assert _manifest.layer is None and _config.is_empty
+        _empty = image_root / RESOURCE_DIR / _manifest.layers[0].digest.digest_hex
+        assert _empty.read_bytes() == b"{}"
+
+    def test_sets_for_several_ecus_and_release_keys_go_into_one_image(
+        self, tree: Path, slots: Path, image_root: Path
+    ):
+        add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+        add_parameter_set_cmd(
+            args(image_root, slots=str(slots), rootfs=str(tree), release_key="prd")
+        )
+        add_parameter_set_cmd(args(image_root, empty=True, ecu_id="perception"))
+        finalize(image_root)
+
+        _prd = ImageIdentifier(ECU, OTAReleaseKey.prd)
+        _perception = ImageIdentifier("perception", OTAReleaseKey.dev)
+        assert ImageIndexHelper(image_root).image_index.image_identifiers == [
+            IMAGE_ID,
+            _prd,
+            _perception,
+        ]
+        _manifest, _config = the_set(image_root, _prd)
+        assert _manifest.annotations.ota_release_key == OTAReleaseKey.prd
+        assert _config.slots == [PARAMS, LAUNCH]
+        assert the_set(image_root, _perception)[1].is_empty
 
     @pytest.mark.parametrize(
         "change, message",
@@ -286,13 +364,23 @@ class TestAddParameterSet:
         assert sorted((image_root / RESOURCE_DIR).iterdir()) == _blobs
 
     def test_a_finalized_image_takes_no_set(
-        self, image_root: Path, capsys: pytest.CaptureFixture
+        self,
+        tree: Path,
+        slots: Path,
+        image_root: Path,
+        capsys: pytest.CaptureFixture,
     ):
         add_parameter_set_cmd(args(image_root, empty=True))
         finalize(image_root)
+        _blobs = blobs(image_root)
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(args(image_root, empty=True, ecu_id="perception"))
-        assert "finalized" in capsys.readouterr().out
+            add_parameter_set_cmd(
+                args(
+                    image_root, slots=str(slots), rootfs=str(tree), ecu_id="perception"
+                )
+            )
+        assert "NOT allowed" in capsys.readouterr().out
+        assert blobs(image_root) == _blobs
 
     def test_an_image_with_file_based_payloads_takes_no_set(
         self, image_root: Path, capsys: pytest.CaptureFixture
@@ -306,9 +394,161 @@ class TestAddParameterSet:
             )
         )
         _helper.sync_index()
+        _blobs = blobs(image_root)
         with pytest.raises(SystemExit):
             add_parameter_set_cmd(args(image_root, empty=True))
         assert "parameter image of its own" in capsys.readouterr().out
+        assert blobs(image_root) == _blobs
+
+    @pytest.mark.parametrize("ecu_id", (ECU, "perception"))
+    @pytest.mark.parametrize("empty", (False, True))
+    def test_an_image_with_a_partition_based_payload_takes_no_set(
+        self,
+        tmp_path: Path,
+        tree: Path,
+        slots: Path,
+        image_root: Path,
+        capsys: pytest.CaptureFixture,
+        ecu_id: str,
+        empty: bool,
+    ):
+        """Of the payload's own ECU or another's, refused before a blob is written."""
+        add_vendor_package(image_root, tmp_path, ECU)
+        _blobs = blobs(image_root)
+        _set = {"empty": True} if empty else {"slots": str(slots), "rootfs": str(tree)}
+        with pytest.raises(SystemExit):
+            add_parameter_set_cmd(args(image_root, ecu_id=ecu_id, **_set))
+        assert "partition-based" in capsys.readouterr().out
+        assert blobs(image_root) == _blobs
+
+    @pytest.mark.parametrize(
+        "break_it, message",
+        (
+            pytest.param(
+                lambda d: (d / "link").symlink_to("default"),
+                "only regular files and directories",
+                id="symlink",
+            ),
+            pytest.param(
+                lambda d: os.chmod(d / "default" / "vehicle.param.yaml", 0o4755),
+                "setuid",
+                id="setuid",
+            ),
+            pytest.param(
+                lambda d: (d / ".wh.default").write_text(""),
+                "whiteout",
+                id="whiteout_name",
+            ),
+            pytest.param(
+                lambda d: (d / os.fsdecode(b"caf\xe9.yaml")).write_text(""),
+                "not UTF-8",
+                id="not_utf8",
+            ),
+        ),
+    )
+    def test_what_the_layer_cannot_hold_is_refused_and_leaves_no_blob(
+        self,
+        tree: Path,
+        slots: Path,
+        image_root: Path,
+        capsys: pytest.CaptureFixture,
+        break_it: Callable[[Path], object],
+        message: str,
+    ):
+        """Found while the layer is written: the half-written layer goes too."""
+        break_it(tree / LAUNCH.relpath)
+        with pytest.raises(SystemExit):
+            add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+        assert message in capsys.readouterr().out
+        assert blobs(image_root) == []
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root reads any directory")
+    def test_a_directory_that_cannot_be_read_is_refused(
+        self,
+        tree: Path,
+        slots: Path,
+        image_root: Path,
+        capsys: pytest.CaptureFixture,
+    ):
+        _unreadable = tree / LAUNCH.relpath / "default"
+        _unreadable.chmod(0)
+        try:
+            with pytest.raises(SystemExit):
+                add_parameter_set_cmd(
+                    args(image_root, slots=str(slots), rootfs=str(tree))
+                )
+        finally:
+            _unreadable.chmod(0o755)
+        assert "cannot read" in capsys.readouterr().out
+        assert blobs(image_root) == []
+
+    @pytest.mark.parametrize(
+        "error, raised",
+        (
+            pytest.param(ValueError("refused"), SystemExit, id="refused"),
+            pytest.param(RuntimeError("a bug"), RuntimeError, id="unexpected"),
+        ),
+    )
+    def test_a_set_that_fails_once_written_leaves_no_blob(
+        self,
+        tree: Path,
+        slots: Path,
+        image_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        error: Exception,
+        raised: type[BaseException],
+    ):
+        """What the libs refuse is reported; anything else is raised as it is, for
+        the command's handler to log with its traceback."""
+
+        def _fail(*_, **__):
+            raise error
+
+        monkeypatch.setattr(ImageIndex, "add_image", _fail)
+        with pytest.raises(raised):
+            add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+        assert blobs(image_root) == []
+
+    def test_a_blob_another_entry_shares_stays_when_a_set_fails(
+        self, image_root: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The empty descriptor's `{}` is every empty set's: a failed one keeps it."""
+        add_parameter_set_cmd(args(image_root, empty=True))
+        _blobs = blobs(image_root)
+
+        def _fail(*_, **__):
+            raise ValueError("refused")
+
+        monkeypatch.setattr(ImageIndex, "add_image", _fail)
+        with pytest.raises(SystemExit):
+            add_parameter_set_cmd(args(image_root, empty=True, ecu_id="perception"))
+        assert blobs(image_root) == _blobs
+
+
+class TestParameterImage:
+    """A parameter image carries parameter sets only: no base payload goes into it."""
+
+    @pytest.fixture(autouse=True)
+    def parameter_image(self, image_root: Path) -> None:
+        add_parameter_set_cmd(args(image_root, empty=True))
+
+    def test_it_takes_no_partition_based_payload(
+        self, tmp_path: Path, image_root: Path, capsys: pytest.CaptureFixture
+    ):
+        _blobs = blobs(image_root)
+        with pytest.raises(SystemExit):
+            add_vendor_package(image_root, tmp_path, "perception")
+        assert "parameter image" in capsys.readouterr().out
+        assert blobs(image_root) == _blobs
+
+    def test_it_takes_no_file_based_payload(
+        self, tmp_path: Path, image_root: Path, capsys: pytest.CaptureFixture
+    ):
+        _blobs = blobs(image_root)
+        with pytest.raises(SystemExit):
+            add_image_cmd(Namespace(image_root=str(image_root), rootfs=str(tmp_path)))
+        assert "parameter image" in capsys.readouterr().out
+        assert blobs(image_root) == _blobs
 
 
 class TestFinalize:
@@ -349,6 +589,11 @@ class TestSlotsFile:
         assert load_parameter_slots(_yaml) == [PARAMS]
         _json = slots_file(tmp_path / "slots.json", PARAMS, LAUNCH)
         assert load_parameter_slots(_json) == [PARAMS, LAUNCH]
+
+    def test_a_json_file_may_be_indented_with_tabs(self, tmp_path: Path):
+        _json = tmp_path / "slots.json"
+        _json.write_text(json.dumps([PARAMS.model_dump()], indent="\t"))
+        assert load_parameter_slots(_json) == [PARAMS]
 
     @pytest.mark.parametrize(
         "content",

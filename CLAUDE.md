@@ -17,7 +17,7 @@ The builder converts a system rootfs into an optimized OTA image (a **file-based
 
 It also adds **partition-based** payloads (`add-partition-image`): whole partition images, data images, a firmware package or a vendor package that the platform's tooling produced, described by a spec JSON, stored zstd-compressed and optionally as block diffs against a previous build. `finalize` leaves these blobs as stored. The schemas are `ota_image_libs.v1.partition_image`, the delta codec `ota_image_tools.libs.block_diff`; the README describes the spec JSON.
 
-It also builds **parameter images** (`add-parameter-set`): per ECU, a parameter set naming the slots it fills (directories of the rootfs, each with the `apply` that makes a change take effect) and one layer of those directories, which a device lays over the base it runs. A set names no base and a base declares no slot. The format and the layer writer are `ota_image_libs.v1.parameter_set`; `finalize` leaves the set's config and layer as stored.
+It also builds **parameter images** (`add-parameter-set`): per ECU, a parameter set naming the slots it fills (directories of the rootfs, each with the `apply` that makes a change take effect) and one layer of those directories, which a device lays over the base it runs. A set names no base and a base declares no slot. A parameter image carries parameter sets only: `add-parameter-set`, `add-image` and `add-partition-image` refuse to mix them with a base payload. The format and the layer writer are `ota_image_libs.v1.parameter_set`; `finalize` leaves the set's config and layer as stored.
 
 ## Commands for Dev
 
