@@ -270,7 +270,9 @@ class TestAddParameterSet:
         assert _config.slots == [self.OVERLAY]
         assert self.OVERLAY.apply[1:] in {_f.path for _f in _config.files or ()}
 
-    @pytest.mark.parametrize("mode", (None, 0o644), ids=("missing", "not_executable"))
+    @pytest.mark.parametrize(
+        "mode", (None, 0o644, 0o757), ids=("missing", "not_executable", "others_write")
+    )
     def test_a_set_without_its_apply_is_refused(
         self,
         tmp_path: Path,
