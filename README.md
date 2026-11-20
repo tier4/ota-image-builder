@@ -204,7 +204,7 @@ What boots before any partition image is read -- the bootloader chain and the fi
 
 ### Parameter sets
 
-A **parameter image** carries a **parameter set** for an ECU: the files of a few directories of its rootfs (the set's *slots*), delivered on their own and laid over the base the ECU runs, without writing a standby slot (spec: [parameter_set.md](https://github.com/tier4/ota-image-libs/blob/main/spec/parameter_set.md)). The set names the slots it fills, each with what makes a change to it take effect -- an executable, or `reboot`. The executable is the one at that path once the slot is in place: inside one of the set's slots it comes with the set (the tree must hold it, executable), outside them it is the base's:
+A **parameter image** carries a **parameter set** for an ECU: the files of a few directories of its rootfs (the set's *slots*), delivered on their own and laid over the base the ECU runs, without writing a standby slot (spec: [parameter_set.md](https://github.com/tier4/ota-image-libs/blob/main/spec/parameter_set.md)). The set names the slots it fills, each with what makes a change to it take effect -- an executable, or `reboot`. The executable is the one at that path once the slot is in place: inside one of the set's slots it comes with the set (the tree must hold it, see `--rootfs` below), outside them it is the base's. Either runs as root on the ECU, so a parameter image is signed under the same keys and controls as base images:
 
 ```yaml
 # slots.yaml: the vehicle overlay as one slot, with the apply.sh it carries
@@ -213,7 +213,7 @@ A **parameter image** carries a **parameter set** for an ECU: the files of a few
   apply: /opt/autoware/vehicle/sample_vehicle/apply.sh   # or: reboot
 ```
 
-The set names no base: which base it suits is decided where the release is evaluated, and a device applies it on the base it runs, refusing it when that base has something other than a directory at a slot's path, or lacks an `apply` of the base. The base declares nothing; what it has at a slot's path (nothing, when it lacks the directory, which the device then makes as the mount point) is what the slot holds when no set fills it. Nothing runs when a slot is taken away. A parameter image is built like any image, with `add-parameter-set` in place of `add-image`; one parameter image per ECU is the usual case:
+The set names no base: which base it suits is decided where the release is evaluated, and a device applies it on the base it runs, refusing it when that base has something other than a directory at a slot's path, or lacks an `apply` of the base. The base declares nothing; what it has at a slot's path is what the slot holds when no set fills it. A device on ota-image-libs 0.8.0 or later also takes a set whose `apply` comes with it and a slot the base has no directory for (it makes the mount point), and runs nothing when a slot is taken away (see the compatibility note below). A parameter image is built like any image, with `add-parameter-set` in place of `add-image`; one parameter image per ECU is the usual case:
 
 ```bash
 ota-image-builder init --annotations-file annotations.yaml param_image/
@@ -224,7 +224,7 @@ ota-image-builder sign ... param_image/
 ota-image-builder pack-artifact ... param_image/
 ```
 
-`--rootfs` holds the slots' directories at their paths (each a real directory, not behind a symbolic link), and the same contents always make the same layer. An empty set (`--empty`, without `--slots` and `--rootfs`) takes away the set applied before: the ECU's slots go back to the base's defaults. A parameter image carries parameter sets only: `add-parameter-set` refuses an image with a file-based or partition-based payload, and `add-image` and `add-partition-image` refuse a parameter image.
+`--rootfs` holds the slots' directories at their paths (each a real directory, not behind a symbolic link), and each `apply` inside them as an executable regular file, not behind a symbolic link, that others cannot write (nor any directory from its slot down to it); the same contents always make the same layer. An empty set (`--empty`, without `--slots` and `--rootfs`) takes away the set applied before: the ECU's slots go back to the base's defaults. A parameter image carries parameter sets only: `add-parameter-set` refuses an image with a file-based or partition-based payload, and `add-image` and `add-partition-image` refuse a parameter image.
 
 ### Subcommands
 
@@ -249,7 +249,7 @@ ota-image-builder pack-artifact ... param_image/
 Use `-d`/`--debug` for debug logging.
 Run `ota-image-builder <command> --help` for detailed usage of each subcommand.
 
-**Compatibility note.** A consumer refuses an `index.json` that lists a manifest kind its ota-image-libs does not know, so an image must carry only entries every one of its consumers can read. The update agent release package (`add-update-agent-package`) is known from ota-image-libs 0.6.0 on: an image that otaclient releases before that (v3.14 and earlier) or other tools on an older library must read carries none, and `add-otaclient-package` therefore writes the OTAClient release package only. Partition-based payloads are read as file-based descriptors by older libraries and do not stop them from finding their own payload. Parameter sets are known from ota-image-libs 0.7.0 on; a consumer on an older library fails on a parameter image before changing anything: on 0.6.0 it refuses the whole index, before that it fails on its own ECU's manifest.
+**Compatibility note.** A consumer refuses an `index.json` that lists a manifest kind its ota-image-libs does not know, so an image must carry only entries every one of its consumers can read. The update agent release package (`add-update-agent-package`) is known from ota-image-libs 0.6.0 on: an image that otaclient releases before that (v3.14 and earlier) or other tools on an older library must read carries none, and `add-otaclient-package` therefore writes the OTAClient release package only. Partition-based payloads are read as file-based descriptors by older libraries and do not stop them from finding their own payload. Parameter sets are known from ota-image-libs 0.7.0 on; a consumer on an older library fails on a parameter image before changing anything: on 0.6.0 it refuses the whole index, before that it fails on its own ECU's manifest. A set whose `apply` is inside its slots, or which fills a slot directory the base lacks, needs ota-image-libs 0.8.0 on the consumer: one on 0.7.0 (otaclient v4.0.0rc5, say) refuses it without changing anything, and runs the base's `apply` of a slot taken away.
 
 ## Specification
 

@@ -74,7 +74,8 @@ def add_parameter_set_cmd_args(
     parser.add_argument(
         "--rootfs",
         help="The tree that holds the slots' directories at their paths "
-        "(<rootfs>/<a slot's path>). Required unless --empty.",
+        "(<rootfs>/<a slot's path>), and each apply inside them as an executable "
+        "regular file others cannot write. Required unless --empty.",
     )
     parser.add_argument(
         "--empty",

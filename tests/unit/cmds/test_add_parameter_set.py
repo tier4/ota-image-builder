@@ -256,6 +256,8 @@ class TestAddParameterSet:
 
     def _overlay_tree(self, root: Path, mode: int | None = 0o755) -> Path:
         make_tree(root, self.OVERLAY)
+        # the umask does not matter: others write nothing on the way to the apply
+        (root / self.OVERLAY.relpath).chmod(0o755)
         if mode is not None:
             _apply = root / self.OVERLAY.apply[1:]
             _apply.write_text("#!/bin/sh\n")
@@ -271,13 +273,20 @@ class TestAddParameterSet:
         assert self.OVERLAY.apply[1:] in {_f.path for _f in _config.files or ()}
 
     @pytest.mark.parametrize(
-        "mode", (None, 0o644, 0o757), ids=("missing", "not_executable", "others_write")
+        "mode, message",
+        (
+            (None, "the set has no apply"),
+            (0o644, "not an executable file of the set"),
+            (0o757, "others can write"),
+        ),
+        ids=("missing", "not_executable", "others_write"),
     )
-    def test_a_set_without_its_apply_is_refused(
+    def test_a_set_whose_apply_does_not_fit_is_refused(
         self,
         tmp_path: Path,
         image_root: Path,
         mode: int | None,
+        message: str,
         capsys: pytest.CaptureFixture,
     ):
         _tree = self._overlay_tree(tmp_path / "tree", mode=mode)
@@ -286,7 +295,9 @@ class TestAddParameterSet:
             add_parameter_set_cmd(
                 args(image_root, slots=str(_slots), rootfs=str(_tree))
             )
-        assert "apply" in capsys.readouterr().out
+        # the message of the check before writing (one after, on the config, would
+        #   say "not among its files" for a missing apply)
+        assert message in capsys.readouterr().out
         assert blobs(image_root) == [], "refused before anything is written"
 
     def test_an_empty_set_needs_no_slots_and_no_tree(self, image_root: Path):
@@ -650,6 +661,9 @@ class TestSlotsFile:
             pytest.param("- name: a\n  path: /x\n", id="no_apply"),
             pytest.param("- name: a\n  path: /x\n  apply: run.sh\n", id="bad_apply"),
             pytest.param("- name: a\n  path: /x\n  apply: /x\n", id="apply_a_slot_dir"),
+            pytest.param(
+                "- name: a\n  path: /x/y\n  apply: /x\n", id="apply_above_a_slot"
+            ),
             pytest.param(
                 "- name: a\n  path: /opt/ota\n  apply: reboot\n", id="reserved"
             ),
