@@ -248,6 +248,45 @@ class TestAddParameterSet:
         add_parameter_set_cmd(args(_other, slots=str(slots), rootfs=str(tree)))
         assert the_set(image_root)[0].layer == the_set(_other)[0].layer
 
+    OVERLAY = ParameterSlot(
+        name="sample_vehicle",
+        path="/opt/autoware/vehicle/sample_vehicle",
+        apply="/opt/autoware/vehicle/sample_vehicle/apply.sh",
+    )
+
+    def _overlay_tree(self, root: Path, mode: int | None = 0o755) -> Path:
+        make_tree(root, self.OVERLAY)
+        if mode is not None:
+            _apply = root / self.OVERLAY.apply[1:]
+            _apply.write_text("#!/bin/sh\n")
+            _apply.chmod(mode)
+        return root
+
+    def test_a_set_that_carries_its_apply(self, tmp_path: Path, image_root: Path):
+        _tree = self._overlay_tree(tmp_path / "tree")
+        _slots = slots_file(tmp_path / "slots.json", self.OVERLAY)
+        add_parameter_set_cmd(args(image_root, slots=str(_slots), rootfs=str(_tree)))
+        _, _config = the_set(image_root)
+        assert _config.slots == [self.OVERLAY]
+        assert self.OVERLAY.apply[1:] in {_f.path for _f in _config.files or ()}
+
+    @pytest.mark.parametrize("mode", (None, 0o644), ids=("missing", "not_executable"))
+    def test_a_set_without_its_apply_is_refused(
+        self,
+        tmp_path: Path,
+        image_root: Path,
+        mode: int | None,
+        capsys: pytest.CaptureFixture,
+    ):
+        _tree = self._overlay_tree(tmp_path / "tree", mode=mode)
+        _slots = slots_file(tmp_path / "slots.json", self.OVERLAY)
+        with pytest.raises(SystemExit):
+            add_parameter_set_cmd(
+                args(image_root, slots=str(_slots), rootfs=str(_tree))
+            )
+        assert "apply" in capsys.readouterr().out
+        assert blobs(image_root) == [], "refused before anything is written"
+
     def test_an_empty_set_needs_no_slots_and_no_tree(self, image_root: Path):
         add_parameter_set_cmd(args(image_root, empty=True))
         _manifest, _config = the_set(image_root)
@@ -608,9 +647,7 @@ class TestSlotsFile:
             ),
             pytest.param("- name: a\n  path: /x\n", id="no_apply"),
             pytest.param("- name: a\n  path: /x\n  apply: run.sh\n", id="bad_apply"),
-            pytest.param(
-                "- name: a\n  path: /x\n  apply: /x/apply.sh\n", id="apply_in_a_slot"
-            ),
+            pytest.param("- name: a\n  path: /x\n  apply: /x\n", id="apply_a_slot_dir"),
             pytest.param(
                 "- name: a\n  path: /opt/ota\n  apply: reboot\n", id="reserved"
             ),
@@ -623,6 +660,11 @@ class TestSlotsFile:
         _f.write_text(content)
         with pytest.raises(ParameterSetError):
             load_parameter_slots(_f)
+
+    def test_slots_whose_apply_comes_with_the_set_are_read(self, tmp_path: Path):
+        _f = tmp_path / "slots.yaml"
+        _f.write_text("- name: a\n  path: /x\n  apply: /x/apply.sh\n")
+        assert [_s.apply for _s in load_parameter_slots(_f)] == ["/x/apply.sh"]
 
     def test_the_tree_holds_each_slots_directory(self, tmp_path: Path):
         _rootfs = make_tree(tmp_path / "rootfs", PARAMS)

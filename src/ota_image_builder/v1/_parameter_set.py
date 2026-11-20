@@ -55,6 +55,7 @@ from ota_image_libs.v1.parameter_set.slots import (
     SLOT_NAME,
     ParameterSlot,
     ParameterSlotRef,
+    check_applies_in_set,
     check_slots,
 )
 from ota_image_libs.v1.update_agent_package.schema import EMPTY_JSON
@@ -277,6 +278,11 @@ def add_parameter_set(
         raise ParameterSetError("a set that fills a slot needs the tree")
     if rootfs is not None:
         check_slots_in_rootfs(rootfs, slots)
+        # an apply inside the slots is a file of the set: the tree must carry it
+        try:
+            check_applies_in_set(rootfs, slots)
+        except ValueError as e:
+            raise ParameterSetError(f"{rootfs}: {e}") from e
     try:
         with _discard_new_blobs_on_failure(resource_dir):
             _descriptor = _write_set(

@@ -204,16 +204,16 @@ What boots before any partition image is read -- the bootloader chain and the fi
 
 ### Parameter sets
 
-A **parameter image** carries a **parameter set** for an ECU: the files of a few directories of its rootfs (the set's *slots*), delivered on their own and laid over the base the ECU runs, without writing a standby slot (spec: [parameter_set.md](https://github.com/tier4/ota-image-libs/blob/main/spec/parameter_set.md)). The set names the slots it fills, each with what makes a change to it take effect -- an executable of the base, outside every slot, or `reboot`:
+A **parameter image** carries a **parameter set** for an ECU: the files of a few directories of its rootfs (the set's *slots*), delivered on their own and laid over the base the ECU runs, without writing a standby slot (spec: [parameter_set.md](https://github.com/tier4/ota-image-libs/blob/main/spec/parameter_set.md)). The set names the slots it fills, each with what makes a change to it take effect -- an executable, or `reboot`. The executable is the one at that path once the slot is in place: inside one of the set's slots it comes with the set (the tree must hold it, executable), outside them it is the base's:
 
 ```yaml
-# slots.yaml
-- name: individual_params
-  path: /opt/autoware/vehicle/sample_vehicle/individual_params
+# slots.yaml: the vehicle overlay as one slot, with the apply.sh it carries
+- name: sample_vehicle
+  path: /opt/autoware/vehicle/sample_vehicle
   apply: /opt/autoware/vehicle/sample_vehicle/apply.sh   # or: reboot
 ```
 
-The set names no base: which base it suits is decided where the release is evaluated, and a device applies it on the base it runs, refusing it when that base lacks a slot's directory or its `apply`. The base declares nothing; its rootfs ships each slot's defaults, which the slot holds when no set fills it. A parameter image is built like any image, with `add-parameter-set` in place of `add-image`; one parameter image per ECU is the usual case:
+The set names no base: which base it suits is decided where the release is evaluated, and a device applies it on the base it runs, refusing it when that base has something other than a directory at a slot's path, or lacks an `apply` of the base. The base declares nothing; what it has at a slot's path (nothing, when it lacks the directory, which the device then makes as the mount point) is what the slot holds when no set fills it. Nothing runs when a slot is taken away. A parameter image is built like any image, with `add-parameter-set` in place of `add-image`; one parameter image per ECU is the usual case:
 
 ```bash
 ota-image-builder init --annotations-file annotations.yaml param_image/
