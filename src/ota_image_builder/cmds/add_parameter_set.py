@@ -67,14 +67,14 @@ def add_parameter_set_cmd_args(
         "--slots",
         metavar="FILE",
         help="A YAML or JSON list of the slots the set fills, each `{name, path, "
-        "apply}`: the directory it replaces, and the base's executable that makes a "
-        "change take effect (or `reboot`). Required unless --empty.",
+        "apply}`: the directory it replaces, and the executable that makes a change "
+        "take effect (the set's own inside its slots, the base's otherwise; or "
+        "`reboot`). Required unless --empty.",
     )
     parser.add_argument(
         "--rootfs",
-        help="The tree that holds the slots' directories at their paths, e.g. "
-        "<rootfs>/opt/autoware/vehicle/<vehicle>/individual_params. "
-        "Required unless --empty.",
+        help="The tree that holds the slots' directories at their paths "
+        "(<rootfs>/<a slot's path>). Required unless --empty.",
     )
     parser.add_argument(
         "--empty",
