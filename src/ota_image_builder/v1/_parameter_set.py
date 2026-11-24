@@ -52,13 +52,11 @@ from ota_image_libs.v1.parameter_set.schema import (
     ParameterSetManifest,
 )
 from ota_image_libs.v1.parameter_set.slots import (
-    APPLY_REBOOT,
     SLOT_NAME,
     ParameterSlot,
     ParameterSlotRef,
     check_applies_in_set,
     check_slots,
-    is_within,
 )
 from ota_image_libs.v1.update_agent_package.schema import EMPTY_JSON
 from pydantic import TypeAdapter
@@ -102,21 +100,6 @@ def carries_parameter_set(index: ImageIndex) -> bool:
 #
 
 
-def check_applies_not_over_slots(what: str, slots: Sequence[ParameterSlot]) -> None:
-    """No `apply` that is a slot's directory or a directory above one: what a device
-    runs is the file at that path, and every device would refuse such a set
-    (ota-image-libs 0.8.0 checks a slot's own directory only). Raises ValueError."""
-    for _slot in slots:
-        if _slot.apply == APPLY_REBOOT:
-            continue
-        for _other in slots:
-            if is_within(_other.path, _slot.apply):
-                raise ValueError(
-                    f"{what}: slot {_slot.name!r}'s apply {_slot.apply} is a "
-                    f"directory, slot {_other.name!r} ({_other.path}) being in it"
-                )
-
-
 def load_parameter_slots(slots_file: Path) -> list[ParameterSlot]:
     """The slots a set fills, from a YAML or JSON list of `{name, path, apply}`."""
     try:
@@ -129,7 +112,6 @@ def load_parameter_slots(slots_file: Path) -> list[ParameterSlot]:
         )
         _slots = TypeAdapter(list[ParameterSlot]).validate_python(_raw)
         check_slots(str(slots_file), _slots)
-        check_applies_not_over_slots(str(slots_file), _slots)
     except (OSError, ValueError, yaml.YAMLError) as e:
         raise ParameterSetError(f"invalid parameter slots in {slots_file}: {e}") from e
     if not _slots:
@@ -290,7 +272,6 @@ def add_parameter_set(
         )
     try:
         check_slots("parameter set", slots)
-        check_applies_not_over_slots("parameter set", slots)
     except ValueError as e:
         raise ParameterSetError(str(e)) from e
     if slots and rootfs is None:

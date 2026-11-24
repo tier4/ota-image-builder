@@ -667,6 +667,23 @@ class TestSlotsFile:
             pytest.param(
                 "- name: a\n  path: /opt/ota\n  apply: reboot\n", id="reserved"
             ),
+            # reserved from ota-image-libs 0.9.0 on: the ECU's identity, the OTA area
+            #   of the writable partition both slots share, the image's trust anchors
+            pytest.param(
+                "- name: a\n  path: /etc/ota\n  apply: reboot\n", id="reserved_identity"
+            ),
+            pytest.param(
+                "- name: a\n  path: /opt/data/ota/x\n  apply: reboot\n",
+                id="reserved_shared_store",
+            ),
+            pytest.param(
+                "- name: a\n  path: /usr/lib/ota\n  apply: reboot\n",
+                id="reserved_trust_anchors",
+            ),
+            pytest.param(
+                "- name: a\n  path: /x\n  apply: /usr/lib/ota/run.sh\n",
+                id="apply_in_reserved",
+            ),
             pytest.param("{not: a list}\n", id="not_a_list"),
             pytest.param("[]\n", id="no_slot"),
         ),
