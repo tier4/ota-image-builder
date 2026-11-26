@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""`add-parameter-set`: a set for one ECU, naming the slots it fills and their applies."""
+"""`add-overlay`: an overlay for one ECU, naming the slots it fills and their applies."""
 
 from __future__ import annotations
 
@@ -32,43 +32,43 @@ from ota_image_libs.v1.consts import RESOURCE_DIR
 from ota_image_libs.v1.image_index.schema import ImageIndex
 from ota_image_libs.v1.image_index.utils import ImageIndexHelper
 from ota_image_libs.v1.image_manifest.schema import ImageIdentifier, OTAReleaseKey
-from ota_image_libs.v1.parameter_set.layer import OPAQUE_WHITEOUT, read_parameter_layer
-from ota_image_libs.v1.parameter_set.schema import (
-    ParameterSetConfig,
-    ParameterSetManifest,
+from ota_image_libs.v1.overlay.layer import OPAQUE_WHITEOUT, read_overlay_layer
+from ota_image_libs.v1.overlay.schema import (
+    OverlayConfig,
+    OverlayManifest,
 )
-from ota_image_libs.v1.parameter_set.slots import ParameterSlot
+from ota_image_libs.v1.overlay.slots import OverlaySlot
 from ota_image_libs.v1.resource_table.schema import ResourceTableDescriptor
 
 from ota_image_builder.cmds.add_image import add_image_cmd
-from ota_image_builder.cmds.add_parameter_set import add_parameter_set_cmd
+from ota_image_builder.cmds.add_overlay import add_overlay_cmd
 from ota_image_builder.cmds.add_partition_image import add_partition_image_cmd
 from ota_image_builder.cmds.finalize import (
     _collect_protected_resources_digest,
     finalize_cmd,
 )
 from ota_image_builder.v1._image_index import init_ota_image
-from ota_image_builder.v1._parameter_set import (
-    ParameterSetError,
+from ota_image_builder.v1._overlay import (
+    OverlayError,
     check_slots_in_rootfs,
-    load_parameter_slots,
+    load_overlay_slots,
 )
 
 ECU = "autoware"
 IMAGE_ID = ImageIdentifier(ECU, OTAReleaseKey.dev)
-PARAMS = ParameterSlot(
+PARAMS = OverlaySlot(
     name="individual_params",
     path="/opt/autoware/vehicle/sample_vehicle/individual_params",
     apply="/opt/autoware/vehicle/sample_vehicle/apply.sh",
 )
-LAUNCH = ParameterSlot(
+LAUNCH = OverlaySlot(
     name="launch",
     path="/opt/autoware/vehicle/sample_vehicle/launch",
     apply="reboot",
 )
 
 
-def make_tree(root: Path, *slots: ParameterSlot) -> Path:
+def make_tree(root: Path, *slots: OverlaySlot) -> Path:
     for _slot in slots:
         _dir = root / _slot.relpath
         (_dir / "default").mkdir(parents=True)
@@ -76,7 +76,7 @@ def make_tree(root: Path, *slots: ParameterSlot) -> Path:
     return root
 
 
-def slots_file(path: Path, *slots: ParameterSlot) -> Path:
+def slots_file(path: Path, *slots: OverlaySlot) -> Path:
     path.write_text(json.dumps([_s.model_dump() for _s in slots]))
     return path
 
@@ -151,11 +151,11 @@ def add_vendor_package(image_root: Path, tmp_path: Path, ecu_id: str) -> None:
     )
 
 
-def the_set(
+def the_overlay(
     image_root: Path, image_id: ImageIdentifier = IMAGE_ID
-) -> tuple[ParameterSetManifest, ParameterSetConfig]:
+) -> tuple[OverlayManifest, OverlayConfig]:
     _helper = ImageIndexHelper(image_root)
-    _descriptor = _helper.image_index.find_parameter_set(image_id)
+    _descriptor = _helper.image_index.find_overlay(image_id)
     assert _descriptor is not None
     _manifest = _descriptor.load_metafile_from_resource_dir(_helper.image_resource_dir)
     _config = _manifest.config.load_metafile_from_resource_dir(
@@ -166,7 +166,7 @@ def the_set(
 
 @pytest.fixture
 def image_root(tmp_path: Path) -> Path:
-    return init_ota_image(tmp_path / "parameter_image", {BUILD_TOOL_VERSION: "test"})
+    return init_ota_image(tmp_path / "overlay_image", {BUILD_TOOL_VERSION: "test"})
 
 
 @pytest.fixture
@@ -179,13 +179,13 @@ def slots(tmp_path: Path) -> Path:
     return slots_file(tmp_path / "slots.json", PARAMS, LAUNCH)
 
 
-class TestAddParameterSet:
-    def test_a_set_fills_the_slots_it_names_with_their_applies(
+class TestAddOverlay:
+    def test_an_overlay_fills_the_slots_it_names_with_their_applies(
         self, tmp_path: Path, tree: Path, slots: Path, image_root: Path
     ):
-        add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+        add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
 
-        _manifest, _config = the_set(image_root)
+        _manifest, _config = the_overlay(image_root)
         assert _config.slots == [PARAMS, LAUNCH]
         assert [_s.apply for _s in _config.slots] == [PARAMS.apply, "reboot"]
         assert _manifest.version == _config.version == "6.1.0"
@@ -198,7 +198,7 @@ class TestAddParameterSet:
         _out = tmp_path / "out"
         _out.mkdir()
         with open(_resource_dir / _layer.digest.digest_hex, "rb") as _blob:
-            read_parameter_layer(
+            read_overlay_layer(
                 _blob,
                 _config.slots,
                 extract_to=_out,
@@ -208,10 +208,10 @@ class TestAddParameterSet:
         assert (_out / PARAMS.relpath / "default" / "vehicle.param.yaml").exists()
         assert not (_out / PARAMS.relpath / OPAQUE_WHITEOUT).exists()
 
-    def test_the_set_names_no_base(self, tree: Path, slots: Path, image_root: Path):
-        add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+    def test_the_overlay_names_no_base(self, tree: Path, slots: Path, image_root: Path):
+        add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
         _helper = ImageIndexHelper(image_root)
-        _descriptor = _helper.image_index.find_parameter_set(IMAGE_ID)
+        _descriptor = _helper.image_index.find_overlay(IMAGE_ID)
         assert _descriptor is not None
         _raw = json.loads(
             (_helper.image_resource_dir / _descriptor.digest.digest_hex).read_text()
@@ -224,11 +224,11 @@ class TestAddParameterSet:
         )
         assert _config["slots"] == [PARAMS.model_dump(), LAUNCH.model_dump()]
 
-    def test_a_set_of_some_slots(self, tmp_path: Path, image_root: Path):
+    def test_an_overlay_of_some_slots(self, tmp_path: Path, image_root: Path):
         _tree = make_tree(tmp_path / "tree", PARAMS)
         _slots = slots_file(tmp_path / "slots.json", PARAMS)
-        add_parameter_set_cmd(args(image_root, slots=str(_slots), rootfs=str(_tree)))
-        assert the_set(image_root)[1].slots == [PARAMS]
+        add_overlay_cmd(args(image_root, slots=str(_slots), rootfs=str(_tree)))
+        assert the_overlay(image_root)[1].slots == [PARAMS]
 
     def test_the_slots_are_read_from_yaml(
         self, tmp_path: Path, tree: Path, image_root: Path
@@ -237,51 +237,51 @@ class TestAddParameterSet:
         _yaml.write_text(
             f"- name: {PARAMS.name}\n  path: {PARAMS.path}\n  apply: {PARAMS.apply}\n"
         )
-        add_parameter_set_cmd(args(image_root, slots=str(_yaml), rootfs=str(tree)))
-        assert the_set(image_root)[1].slots == [PARAMS]
+        add_overlay_cmd(args(image_root, slots=str(_yaml), rootfs=str(tree)))
+        assert the_overlay(image_root)[1].slots == [PARAMS]
 
     def test_the_same_tree_makes_the_same_layer(
         self, tmp_path: Path, tree: Path, slots: Path, image_root: Path
     ):
-        add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+        add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
         _other = init_ota_image(tmp_path / "other", {BUILD_TOOL_VERSION: "test"})
-        add_parameter_set_cmd(args(_other, slots=str(slots), rootfs=str(tree)))
-        assert the_set(image_root)[0].layer == the_set(_other)[0].layer
+        add_overlay_cmd(args(_other, slots=str(slots), rootfs=str(tree)))
+        assert the_overlay(image_root)[0].layer == the_overlay(_other)[0].layer
 
-    OVERLAY = ParameterSlot(
+    VEHICLE = OverlaySlot(
         name="sample_vehicle",
         path="/opt/autoware/vehicle/sample_vehicle",
         apply="/opt/autoware/vehicle/sample_vehicle/apply.sh",
     )
 
-    def _overlay_tree(self, root: Path, mode: int | None = 0o755) -> Path:
-        make_tree(root, self.OVERLAY)
+    def _vehicle_tree(self, root: Path, mode: int | None = 0o755) -> Path:
+        make_tree(root, self.VEHICLE)
         # the umask does not matter: others write nothing on the way to the apply
-        (root / self.OVERLAY.relpath).chmod(0o755)
+        (root / self.VEHICLE.relpath).chmod(0o755)
         if mode is not None:
-            _apply = root / self.OVERLAY.apply[1:]
+            _apply = root / self.VEHICLE.apply[1:]
             _apply.write_text("#!/bin/sh\n")
             _apply.chmod(mode)
         return root
 
-    def test_a_set_that_carries_its_apply(self, tmp_path: Path, image_root: Path):
-        _tree = self._overlay_tree(tmp_path / "tree")
-        _slots = slots_file(tmp_path / "slots.json", self.OVERLAY)
-        add_parameter_set_cmd(args(image_root, slots=str(_slots), rootfs=str(_tree)))
-        _, _config = the_set(image_root)
-        assert _config.slots == [self.OVERLAY]
-        assert self.OVERLAY.apply[1:] in {_f.path for _f in _config.files or ()}
+    def test_an_overlay_that_carries_its_apply(self, tmp_path: Path, image_root: Path):
+        _tree = self._vehicle_tree(tmp_path / "tree")
+        _slots = slots_file(tmp_path / "slots.json", self.VEHICLE)
+        add_overlay_cmd(args(image_root, slots=str(_slots), rootfs=str(_tree)))
+        _, _config = the_overlay(image_root)
+        assert _config.slots == [self.VEHICLE]
+        assert self.VEHICLE.apply[1:] in {_f.path for _f in _config.files or ()}
 
     @pytest.mark.parametrize(
         "mode, message",
         (
-            (None, "the set has no apply"),
-            (0o644, "not an executable file of the set"),
+            (None, "the overlay has no apply"),
+            (0o644, "not an executable file of the overlay"),
             (0o757, "others can write"),
         ),
         ids=("missing", "not_executable", "others_write"),
     )
-    def test_a_set_whose_apply_does_not_fit_is_refused(
+    def test_an_overlay_whose_apply_does_not_fit_is_refused(
         self,
         tmp_path: Path,
         image_root: Path,
@@ -289,32 +289,30 @@ class TestAddParameterSet:
         message: str,
         capsys: pytest.CaptureFixture,
     ):
-        _tree = self._overlay_tree(tmp_path / "tree", mode=mode)
-        _slots = slots_file(tmp_path / "slots.json", self.OVERLAY)
+        _tree = self._vehicle_tree(tmp_path / "tree", mode=mode)
+        _slots = slots_file(tmp_path / "slots.json", self.VEHICLE)
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(
-                args(image_root, slots=str(_slots), rootfs=str(_tree))
-            )
+            add_overlay_cmd(args(image_root, slots=str(_slots), rootfs=str(_tree)))
         # the message of the check before writing (one after, on the config, would
         #   say "not among its files" for a missing apply)
         assert message in capsys.readouterr().out
         assert blobs(image_root) == [], "refused before anything is written"
 
-    def test_an_empty_set_needs_no_slots_and_no_tree(self, image_root: Path):
-        add_parameter_set_cmd(args(image_root, empty=True))
-        _manifest, _config = the_set(image_root)
+    def test_an_empty_overlay_needs_no_slots_and_no_tree(self, image_root: Path):
+        add_overlay_cmd(args(image_root, empty=True))
+        _manifest, _config = the_overlay(image_root)
         assert _manifest.layer is None and _config.is_empty
         _empty = image_root / RESOURCE_DIR / _manifest.layers[0].digest.digest_hex
         assert _empty.read_bytes() == b"{}"
 
-    def test_sets_for_several_ecus_and_release_keys_go_into_one_image(
+    def test_overlays_for_several_ecus_and_release_keys_go_into_one_image(
         self, tree: Path, slots: Path, image_root: Path
     ):
-        add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
-        add_parameter_set_cmd(
+        add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+        add_overlay_cmd(
             args(image_root, slots=str(slots), rootfs=str(tree), release_key="prd")
         )
-        add_parameter_set_cmd(args(image_root, empty=True, ecu_id="perception"))
+        add_overlay_cmd(args(image_root, empty=True, ecu_id="perception"))
         finalize(image_root)
 
         _prd = ImageIdentifier(ECU, OTAReleaseKey.prd)
@@ -324,10 +322,10 @@ class TestAddParameterSet:
             _prd,
             _perception,
         ]
-        _manifest, _config = the_set(image_root, _prd)
+        _manifest, _config = the_overlay(image_root, _prd)
         assert _manifest.annotations.ota_release_key == OTAReleaseKey.prd
         assert _config.slots == [PARAMS, LAUNCH]
-        assert the_set(image_root, _perception)[1].is_empty
+        assert the_overlay(image_root, _perception)[1].is_empty
 
     @pytest.mark.parametrize(
         "change, message",
@@ -345,10 +343,10 @@ class TestAddParameterSet:
                 id="empty_and_tree",
             ),
             pytest.param({"version": "1 0"}, "not a valid version", id="bad_version"),
-            pytest.param({"name": "a set"}, "not a valid name", id="bad_name"),
+            pytest.param({"name": "an overlay"}, "not a valid name", id="bad_name"),
         ),
     )
-    def test_what_makes_no_set_is_refused(
+    def test_what_makes_no_overlay_is_refused(
         self,
         tree: Path,
         slots: Path,
@@ -358,14 +356,11 @@ class TestAddParameterSet:
         message: str,
     ):
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(
+            add_overlay_cmd(
                 args(image_root, **{"slots": str(slots), "rootfs": str(tree), **change})
             )
         assert message in capsys.readouterr().out
-        assert (
-            ImageIndexHelper(image_root).image_index.find_parameter_set(IMAGE_ID)
-            is None
-        )
+        assert ImageIndexHelper(image_root).image_index.find_overlay(IMAGE_ID) is None
         assert list((image_root / RESOURCE_DIR).iterdir()) == [], "no blob left over"
 
     def test_a_slot_dir_missing_from_the_tree_is_refused(
@@ -377,7 +372,7 @@ class TestAddParameterSet:
     ):
         _tree = make_tree(tmp_path / "tree", PARAMS)
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(_tree)))
+            add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(_tree)))
         assert "'launch'" in capsys.readouterr().out
         assert list((image_root / RESOURCE_DIR).iterdir()) == []
 
@@ -392,11 +387,11 @@ class TestAddParameterSet:
         _elsewhere = make_tree(tmp_path / "elsewhere", LAUNCH)
         (_tree / LAUNCH.relpath).symlink_to(_elsewhere / LAUNCH.relpath)
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(_tree)))
+            add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(_tree)))
         assert "symbolic link" in capsys.readouterr().out
         assert list((image_root / RESOURCE_DIR).iterdir()) == []
 
-    def test_a_second_set_for_the_same_ecu_is_refused_before_writing(
+    def test_a_second_overlay_for_the_same_ecu_is_refused_before_writing(
         self,
         tmp_path: Path,
         tree: Path,
@@ -404,29 +399,27 @@ class TestAddParameterSet:
         image_root: Path,
         capsys: pytest.CaptureFixture,
     ):
-        add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+        add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
         _blobs = sorted((image_root / RESOURCE_DIR).iterdir())
         _other = make_tree(tmp_path / "other", PARAMS, LAUNCH)
         (_other / PARAMS.relpath / "extra").write_text("changes the layer\n")
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(
-                args(image_root, slots=str(slots), rootfs=str(_other))
-            )
+            add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(_other)))
         assert "already carries a payload" in capsys.readouterr().out
         assert sorted((image_root / RESOURCE_DIR).iterdir()) == _blobs
 
-    def test_a_finalized_image_takes_no_set(
+    def test_a_finalized_image_takes_no_overlay(
         self,
         tree: Path,
         slots: Path,
         image_root: Path,
         capsys: pytest.CaptureFixture,
     ):
-        add_parameter_set_cmd(args(image_root, empty=True))
+        add_overlay_cmd(args(image_root, empty=True))
         finalize(image_root)
         _blobs = blobs(image_root)
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(
+            add_overlay_cmd(
                 args(
                     image_root, slots=str(slots), rootfs=str(tree), ecu_id="perception"
                 )
@@ -434,10 +427,10 @@ class TestAddParameterSet:
         assert "NOT allowed" in capsys.readouterr().out
         assert blobs(image_root) == _blobs
 
-    def test_an_image_with_file_based_payloads_takes_no_set(
+    def test_an_image_with_file_based_payloads_takes_no_overlay(
         self, image_root: Path, capsys: pytest.CaptureFixture
     ):
-        """An image with a resource table holds file-based payloads: a parameter
+        """An image with a resource table holds file-based payloads: an overlay
         image is one of its own."""
         _helper = ImageIndexHelper(image_root)
         _helper.image_index.update_resource_table(
@@ -448,13 +441,13 @@ class TestAddParameterSet:
         _helper.sync_index()
         _blobs = blobs(image_root)
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(args(image_root, empty=True))
-        assert "parameter image of its own" in capsys.readouterr().out
+            add_overlay_cmd(args(image_root, empty=True))
+        assert "overlay image of its own" in capsys.readouterr().out
         assert blobs(image_root) == _blobs
 
     @pytest.mark.parametrize("ecu_id", (ECU, "perception"))
     @pytest.mark.parametrize("empty", (False, True))
-    def test_an_image_with_a_partition_based_payload_takes_no_set(
+    def test_an_image_with_a_partition_based_payload_takes_no_overlay(
         self,
         tmp_path: Path,
         tree: Path,
@@ -467,9 +460,11 @@ class TestAddParameterSet:
         """Of the payload's own ECU or another's, refused before a blob is written."""
         add_vendor_package(image_root, tmp_path, ECU)
         _blobs = blobs(image_root)
-        _set = {"empty": True} if empty else {"slots": str(slots), "rootfs": str(tree)}
+        _overlay = (
+            {"empty": True} if empty else {"slots": str(slots), "rootfs": str(tree)}
+        )
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(args(image_root, ecu_id=ecu_id, **_set))
+            add_overlay_cmd(args(image_root, ecu_id=ecu_id, **_overlay))
         assert "partition-based" in capsys.readouterr().out
         assert blobs(image_root) == _blobs
 
@@ -510,7 +505,7 @@ class TestAddParameterSet:
         """Found while the layer is written: the half-written layer goes too."""
         break_it(tree / LAUNCH.relpath)
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+            add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
         assert message in capsys.readouterr().out
         assert blobs(image_root) == []
 
@@ -526,9 +521,7 @@ class TestAddParameterSet:
         _unreadable.chmod(0)
         try:
             with pytest.raises(SystemExit):
-                add_parameter_set_cmd(
-                    args(image_root, slots=str(slots), rootfs=str(tree))
-                )
+                add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
         finally:
             _unreadable.chmod(0o755)
         assert "cannot read" in capsys.readouterr().out
@@ -541,7 +534,7 @@ class TestAddParameterSet:
             pytest.param(RuntimeError("a bug"), RuntimeError, id="unexpected"),
         ),
     )
-    def test_a_set_that_fails_once_written_leaves_no_blob(
+    def test_an_overlay_that_fails_once_written_leaves_no_blob(
         self,
         tree: Path,
         slots: Path,
@@ -558,14 +551,14 @@ class TestAddParameterSet:
 
         monkeypatch.setattr(ImageIndex, "add_image", _fail)
         with pytest.raises(raised):
-            add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+            add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
         assert blobs(image_root) == []
 
-    def test_a_blob_another_entry_shares_stays_when_a_set_fails(
+    def test_a_blob_another_entry_shares_stays_when_an_overlay_fails(
         self, image_root: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """The empty descriptor's `{}` is every empty set's: a failed one keeps it."""
-        add_parameter_set_cmd(args(image_root, empty=True))
+        """The empty descriptor's `{}` is every empty overlay's: a failed one keeps it."""
+        add_overlay_cmd(args(image_root, empty=True))
         _blobs = blobs(image_root)
 
         def _fail(*_, **__):
@@ -573,16 +566,16 @@ class TestAddParameterSet:
 
         monkeypatch.setattr(ImageIndex, "add_image", _fail)
         with pytest.raises(SystemExit):
-            add_parameter_set_cmd(args(image_root, empty=True, ecu_id="perception"))
+            add_overlay_cmd(args(image_root, empty=True, ecu_id="perception"))
         assert blobs(image_root) == _blobs
 
 
-class TestParameterImage:
-    """A parameter image carries parameter sets only: no base payload goes into it."""
+class TestOverlayImage:
+    """An overlay image carries overlays only: no base payload goes into it."""
 
     @pytest.fixture(autouse=True)
-    def parameter_image(self, image_root: Path) -> None:
-        add_parameter_set_cmd(args(image_root, empty=True))
+    def overlay_image(self, image_root: Path) -> None:
+        add_overlay_cmd(args(image_root, empty=True))
 
     def test_it_takes_no_partition_based_payload(
         self, tmp_path: Path, image_root: Path, capsys: pytest.CaptureFixture
@@ -590,7 +583,7 @@ class TestParameterImage:
         _blobs = blobs(image_root)
         with pytest.raises(SystemExit):
             add_vendor_package(image_root, tmp_path, "perception")
-        assert "parameter image" in capsys.readouterr().out
+        assert "overlay image" in capsys.readouterr().out
         assert blobs(image_root) == _blobs
 
     def test_it_takes_no_file_based_payload(
@@ -599,25 +592,25 @@ class TestParameterImage:
         _blobs = blobs(image_root)
         with pytest.raises(SystemExit):
             add_image_cmd(Namespace(image_root=str(image_root), rootfs=str(tmp_path)))
-        assert "parameter image" in capsys.readouterr().out
+        assert "overlay image" in capsys.readouterr().out
         assert blobs(image_root) == _blobs
 
 
 class TestFinalize:
-    def test_finalize_keeps_the_sets_config_and_layer_out_of_the_filters(
+    def test_finalize_keeps_the_overlays_config_and_layer_out_of_the_filters(
         self, tree: Path, slots: Path, image_root: Path
     ):
-        add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
-        _manifest, _ = the_set(image_root)
+        add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+        _manifest, _ = the_overlay(image_root)
         _protected = _collect_protected_resources_digest(ImageIndexHelper(image_root))
         assert _manifest.config.digest.digest in _protected
         assert _manifest.layers[0].digest.digest in _protected
 
-    def test_finalize_keeps_the_sets_blobs_as_stored(
+    def test_finalize_keeps_the_overlays_blobs_as_stored(
         self, tree: Path, slots: Path, image_root: Path
     ):
-        add_parameter_set_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
-        _manifest, _config = the_set(image_root)
+        add_overlay_cmd(args(image_root, slots=str(slots), rootfs=str(tree)))
+        _manifest, _config = the_overlay(image_root)
         _resource_dir = image_root / RESOURCE_DIR
         _layer = _manifest.layer
         assert _layer is not None
@@ -629,7 +622,7 @@ class TestFinalize:
         assert _index.image_finalized and _index.image_resource_table is None
         assert (_resource_dir / _layer.digest.digest_hex).read_bytes() == _layer_bytes
         assert (_resource_dir / _manifest.config.digest.digest_hex).is_file()
-        assert the_set(image_root) == (_manifest, _config)
+        assert the_overlay(image_root) == (_manifest, _config)
 
 
 class TestSlotsFile:
@@ -638,14 +631,14 @@ class TestSlotsFile:
         _yaml.write_text(
             f"- name: individual_params\n  path: {PARAMS.path}\n  apply: {PARAMS.apply}\n"
         )
-        assert load_parameter_slots(_yaml) == [PARAMS]
+        assert load_overlay_slots(_yaml) == [PARAMS]
         _json = slots_file(tmp_path / "slots.json", PARAMS, LAUNCH)
-        assert load_parameter_slots(_json) == [PARAMS, LAUNCH]
+        assert load_overlay_slots(_json) == [PARAMS, LAUNCH]
 
     def test_a_json_file_may_be_indented_with_tabs(self, tmp_path: Path):
         _json = tmp_path / "slots.json"
         _json.write_text(json.dumps([PARAMS.model_dump()], indent="\t"))
-        assert load_parameter_slots(_json) == [PARAMS]
+        assert load_overlay_slots(_json) == [PARAMS]
 
     @pytest.mark.parametrize(
         "content",
@@ -691,19 +684,19 @@ class TestSlotsFile:
     def test_slots_that_do_not_hold_are_refused(self, tmp_path: Path, content: str):
         _f = tmp_path / "slots.yaml"
         _f.write_text(content)
-        with pytest.raises(ParameterSetError):
-            load_parameter_slots(_f)
+        with pytest.raises(OverlayError):
+            load_overlay_slots(_f)
 
-    def test_slots_whose_apply_comes_with_the_set_are_read(self, tmp_path: Path):
+    def test_slots_whose_apply_comes_with_the_overlay_are_read(self, tmp_path: Path):
         _f = tmp_path / "slots.yaml"
         _f.write_text("- name: a\n  path: /x\n  apply: /x/apply.sh\n")
-        assert [_s.apply for _s in load_parameter_slots(_f)] == ["/x/apply.sh"]
+        assert [_s.apply for _s in load_overlay_slots(_f)] == ["/x/apply.sh"]
 
     def test_the_tree_holds_each_slots_directory(self, tmp_path: Path):
         _rootfs = make_tree(tmp_path / "rootfs", PARAMS)
         check_slots_in_rootfs(_rootfs, [PARAMS])
-        with pytest.raises(ParameterSetError, match="launch"):
+        with pytest.raises(OverlayError, match="launch"):
             check_slots_in_rootfs(_rootfs, [PARAMS, LAUNCH])
         (_rootfs / LAUNCH.relpath).symlink_to(_rootfs / PARAMS.relpath)
-        with pytest.raises(ParameterSetError, match="launch"):
+        with pytest.raises(OverlayError, match="launch"):
             check_slots_in_rootfs(_rootfs, [LAUNCH])

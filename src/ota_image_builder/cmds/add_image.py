@@ -52,7 +52,7 @@ from ota_image_builder.v1._image_manifest import (
     AddImageManifestAnnotations,
     compose_image_manifest,
 )
-from ota_image_builder.v1._parameter_set import carries_parameter_set
+from ota_image_builder.v1._overlay import carries_overlay
 from ota_image_builder.v1._resource_process._db_utils import (
     DataBaseBuilder,
     ImageStats,
@@ -224,10 +224,9 @@ def add_image_cmd(args: Namespace) -> None:
     image_index = index_helper.image_index
     if image_index.image_finalized or image_index.image_signed:
         exit_with_err_msg("Modifying an already finalized image is NOT allowed, abort!")
-    if carries_parameter_set(image_index):
+    if carries_overlay(image_index):
         exit_with_err_msg(
-            "The image is a parameter image: it carries parameter sets only, "
-            "no image payload."
+            "The image is an overlay image: it carries overlays only, no image payload."
         )
 
     rootfs_path = Path(args.rootfs).resolve()
