@@ -17,7 +17,7 @@ The builder converts a system rootfs into an optimized OTA image (a **file-based
 
 It also adds **partition-based** payloads (`add-partition-image`): whole partition images, data images, a firmware package or a vendor package that the platform's tooling produced, described by a spec JSON, stored zstd-compressed and optionally as block diffs against a previous build. `finalize` leaves these blobs as stored. The schemas are `ota_image_libs.v1.partition_image`, the delta codec `ota_image_tools.libs.block_diff`; the README describes the spec JSON.
 
-It also builds **parameter images** (`add-parameter-set`): per ECU, a parameter set naming the slots it fills (directories of the rootfs, each with the `apply` that makes a change take effect) and one layer of those directories, which a device lays over the base it runs. A set names no base and a base declares no slot. A parameter image carries parameter sets only: `add-parameter-set`, `add-image` and `add-partition-image` refuse to mix them with a base payload. The format and the layer writer are `ota_image_libs.v1.parameter_set`; `finalize` leaves the set's config and layer as stored.
+It also builds **overlay images** (`add-overlay`): per ECU, an overlay naming the slots it fills (directories of the rootfs, each with the `apply` that makes a change take effect) and one layer of those directories, which a device lays over the base it runs. An overlay names no base and a base declares no slot. An overlay image carries overlays only: `add-overlay`, `add-image` and `add-partition-image` refuse to mix them with a base payload. The format and the layer writer are `ota_image_libs.v1.overlay`; `finalize` leaves the overlay's config and layer as stored.
 
 ## Commands for Dev
 
@@ -94,7 +94,7 @@ The builder provides the following subcommands (registered in `main.py`):
 | `build-exclude-cfg` | `build_exclude_cfg.py` | Build exclusion glob pattern files |
 | `add-image` | `add_image.py` | Add system image to OTA image (core operation — processes rootfs, creates file_table, resource_table, manifests) |
 | `add-partition-image` | `add_partition_image.py` | Add a partition-based payload from a spec JSON (composition in `v1/_partition_image.py`) |
-| `add-parameter-set` | `add_parameter_set.py` | Add a parameter set for one ECU into a parameter image, from a slots file and the tree holding the slots (composition in `v1/_parameter_set.py`) |
+| `add-overlay` | `add_overlay.py` | Add an overlay for one ECU into an overlay image, from a slots file and the tree holding the slots (composition in `v1/_overlay.py`) |
 | `add-otaclient-package` | `add_otaclient_package.py` | Add OTAClient release package (never the update agent release package: clients on ota-image-libs < 0.6.0 refuse an index with a manifest kind they do not know) |
 | `add-otaclient-package-compat` | `add_otaclient_package_compat.py` | Legacy OTAClient compatibility |
 | `add-update-agent-package` | `add_update_agent_package.py` | Add update agent bundles (the agent that applies the image) |
@@ -116,7 +116,7 @@ Builder-side logic for composing OTA image v1 metadata and processing resources:
 | `_image_manifest.py` | Image manifest composition per ECU payload |
 | `_image_config.py` | Image config composition with rootfs statistics |
 | `_partition_image.py` | Partition-based payload: the spec JSON, blob storage (compression, block diffs), config and manifest composition |
-| `_parameter_set.py` | Parameter set composition: the slots file, the slots' directories in the tree, layer, config and manifest |
+| `_overlay.py` | Overlay composition: the slots file, the slots' directories in the tree, layer, config and manifest |
 | `_resource_process/` | Resource processing pipeline (see below) |
 
 ### Resource Processing Pipeline (`v1/_resource_process/`)

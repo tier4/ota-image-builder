@@ -11,13 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Parameter sets: per ECU, the files of a few directories of its rootfs (the set's
-slots), in a parameter image of their own (`add-parameter-set`).
+"""Overlays: per ECU, the files of a few directories of its rootfs (the overlay's
+slots), in an overlay image of their own (`add-overlay`).
 
-A set names the slots it fills, each with how a change to it takes effect (`apply`);
-it names no base: which base it suits is decided where the release is evaluated. The
-format is ota-image-libs' (spec/parameter_set.md): the layer is written by its
-`write_parameter_layer`, so that the same slot contents always make the same layer.
+An overlay names the slots it fills, each with how a change to it takes effect
+(`apply`); it names no base: which base it suits is decided where the release is
+evaluated. The format is ota-image-libs' (spec/overlay.md): the layer is written by
+its `write_overlay_layer`, so that the same slot contents always make the same layer.
 """
 
 from __future__ import annotations
@@ -34,28 +34,28 @@ from ota_image_libs.common import tmp_fname
 from ota_image_libs.common.oci_spec import Sha256Digest
 from ota_image_libs.v1.annotation_keys import (
     OTA_RELEASE_KEY,
-    PARAMETER_SET_VERSION,
+    OVERLAY_VERSION,
     PLATFORM_ECU,
 )
 from ota_image_libs.v1.image_index.schema import IMAGE_PAYLOAD_DESCRIPTORS, ImageIndex
 from ota_image_libs.v1.image_manifest.schema import ImageIdentifier
-from ota_image_libs.v1.parameter_set.layer import (
-    ParameterLayerInvalid,
-    write_parameter_layer,
+from ota_image_libs.v1.overlay.layer import (
+    OverlayLayerInvalid,
+    write_overlay_layer,
 )
-from ota_image_libs.v1.parameter_set.schema import (
+from ota_image_libs.v1.overlay.schema import (
     VERSION,
     EmptyDescriptor,
-    ParameterLayerDescriptor,
-    ParameterSetConfig,
-    ParameterSetFileEntry,
-    ParameterSetManifest,
+    OverlayConfig,
+    OverlayFileEntry,
+    OverlayLayerDescriptor,
+    OverlayManifest,
 )
-from ota_image_libs.v1.parameter_set.slots import (
+from ota_image_libs.v1.overlay.slots import (
     SLOT_NAME,
-    ParameterSlot,
-    ParameterSlotRef,
-    check_applies_in_set,
+    OverlaySlot,
+    OverlaySlotRef,
+    check_applies_in_overlay,
     check_slots,
 )
 from ota_image_libs.v1.update_agent_package.schema import EMPTY_JSON
@@ -64,8 +64,8 @@ from pydantic import TypeAdapter
 logger = logging.getLogger(__name__)
 
 
-class ParameterSetError(Exception):
-    """The inputs do not make a parameter set; the message says why."""
+class OverlayError(Exception):
+    """The inputs do not make an overlay; the message says why."""
 
 
 def _payload_id(image_id: ImageIdentifier) -> str:
@@ -73,35 +73,34 @@ def _payload_id(image_id: ImageIdentifier) -> str:
 
 
 #
-# ------ what a parameter image carries ------ #
+# ------ what an overlay image carries ------ #
 #
 
 
 def carries_base_payload(index: ImageIndex) -> bool:
     """The index lists a file-based or partition-based payload, or the resource table
-    of file-based ones: no parameter set goes beside them (spec/parameter_set.md)."""
+    of file-based ones: no overlay goes beside them (spec/overlay.md)."""
     return index.image_resource_table is not None or any(
         isinstance(_entry, IMAGE_PAYLOAD_DESCRIPTORS)
-        and not isinstance(_entry, ParameterSetManifest.Descriptor)
+        and not isinstance(_entry, OverlayManifest.Descriptor)
         for _entry in index.manifests
     )
 
 
-def carries_parameter_set(index: ImageIndex) -> bool:
-    """The index is a parameter image's: no base payload goes beside its sets."""
+def carries_overlay(index: ImageIndex) -> bool:
+    """The index is an overlay image's: no base payload goes beside its overlays."""
     return any(
-        isinstance(_entry, ParameterSetManifest.Descriptor)
-        for _entry in index.manifests
+        isinstance(_entry, OverlayManifest.Descriptor) for _entry in index.manifests
     )
 
 
 #
-# ------ the set's slots ------ #
+# ------ the overlay's slots ------ #
 #
 
 
-def load_parameter_slots(slots_file: Path) -> list[ParameterSlot]:
-    """The slots a set fills, from a YAML or JSON list of `{name, path, apply}`."""
+def load_overlay_slots(slots_file: Path) -> list[OverlaySlot]:
+    """The slots an overlay fills, from a YAML or JSON list of `{name, path, apply}`."""
     try:
         _text = slots_file.read_text()
         # YAML takes most JSON, but not the tabs a JSON file may be indented with
@@ -110,21 +109,21 @@ def load_parameter_slots(slots_file: Path) -> list[ParameterSlot]:
             if slots_file.suffix.lower() == ".json"
             else yaml.safe_load(_text)
         )
-        _slots = TypeAdapter(list[ParameterSlot]).validate_python(_raw)
+        _slots = TypeAdapter(list[OverlaySlot]).validate_python(_raw)
         check_slots(str(slots_file), _slots)
     except (OSError, ValueError, yaml.YAMLError) as e:
-        raise ParameterSetError(f"invalid parameter slots in {slots_file}: {e}") from e
+        raise OverlayError(f"invalid overlay slots in {slots_file}: {e}") from e
     if not _slots:
-        raise ParameterSetError(
-            f"{slots_file} names no slot: an empty set is made with --empty"
+        raise OverlayError(
+            f"{slots_file} names no slot: an empty overlay is made with --empty"
         )
     return _slots
 
 
-def check_slots_in_rootfs(rootfs: Path, slots: Sequence[ParameterSlotRef]) -> None:
+def check_slots_in_rootfs(rootfs: Path, slots: Sequence[OverlaySlotRef]) -> None:
     """The tree holds each slot's directory at its path, a real one.
 
-    The same rule the layer writer applies (`write_parameter_layer`), checked here so
+    The same rule the layer writer applies (`write_overlay_layer`), checked here so
     that a tree that makes no layer is refused before any slot is compressed.
     """
     _root = os.path.realpath(rootfs)
@@ -132,25 +131,26 @@ def check_slots_in_rootfs(rootfs: Path, slots: Sequence[ParameterSlotRef]) -> No
         _dir = rootfs / _slot.relpath
         # a link on the way would be followed on the build machine, out of the tree
         if os.path.realpath(_dir) != os.path.join(_root, _slot.relpath):
-            raise ParameterSetError(
+            raise OverlayError(
                 f"slot {_slot.name!r}: {_slot.path} is behind a symbolic link in {rootfs}"
             )
         if not _dir.is_dir():
-            raise ParameterSetError(
+            raise OverlayError(
                 f"slot {_slot.name!r}: {_slot.path} is not a directory in {rootfs}"
             )
 
 
 #
-# ------ the set ------ #
+# ------ the overlay ------ #
 #
 
 
 @contextmanager
 def _discard_new_blobs_on_failure(resource_dir: Path) -> Iterator[None]:
-    """A blob written for a set that then fails would stay in the image, referenced by
-    nothing: on failure, remove the blobs that were not there before. Blobs are named
-    by their contents, so one that was there already is another entry's too and stays.
+    """A blob written for an overlay that then fails would stay in the image,
+    referenced by nothing: on failure, remove the blobs that were not there before.
+    Blobs are named by their contents, so one that was there already is another
+    entry's too and stays.
     """
     _before = set(os.listdir(resource_dir))
     try:
@@ -161,25 +161,25 @@ def _discard_new_blobs_on_failure(resource_dir: Path) -> Iterator[None]:
         raise
 
 
-def _check_file_names(files: Sequence[ParameterSetFileEntry]) -> None:
+def _check_file_names(files: Sequence[OverlayFileEntry]) -> None:
     # the layer can carry any name, the config lists the files' paths as JSON strings
     for _f in files:
         try:
             _f.path.encode("utf-8")
         except UnicodeEncodeError:
-            raise ParameterSetError(
+            raise OverlayError(
                 f"{os.fsencode(_f.path)!r}: a file name that is not UTF-8, which the "
-                "set's config cannot list"
+                "overlay's config cannot list"
             ) from None
 
 
 def _add_layer(
-    rootfs: Path, slots: Sequence[ParameterSlotRef], resource_dir: Path
-) -> tuple[ParameterLayerDescriptor, Sha256Digest, list[ParameterSetFileEntry]]:
-    _tmp = resource_dir / tmp_fname("parameter_layer")
+    rootfs: Path, slots: Sequence[OverlaySlotRef], resource_dir: Path
+) -> tuple[OverlayLayerDescriptor, Sha256Digest, list[OverlayFileEntry]]:
+    _tmp = resource_dir / tmp_fname("overlay_layer")
     try:
         with open(_tmp, "wb") as _out:
-            _info = write_parameter_layer(rootfs, slots, _out)
+            _info = write_overlay_layer(rootfs, slots, _out)
         assert _info.digest is not None and _info.diff_id is not None
         _check_file_names(_info.files)
         os.replace(_tmp, resource_dir / _info.digest.digest_hex)
@@ -190,26 +190,26 @@ def _add_layer(
         f"{_info.files_size} bytes unpacked"
     )
     return (
-        ParameterLayerDescriptor(size=_info.size, digest=_info.digest),
+        OverlayLayerDescriptor(size=_info.size, digest=_info.digest),
         _info.diff_id,
         _info.files,
     )
 
 
-def _write_set(
+def _write_overlay(
     *,
     resource_dir: Path,
     image_id: ImageIdentifier,
-    slots: list[ParameterSlot],
+    slots: list[OverlaySlot],
     rootfs: Path | None,
     name: str,
     version: str,
-) -> ParameterSetManifest.Descriptor:
-    _layers: list[ParameterLayerDescriptor | EmptyDescriptor]
+) -> OverlayManifest.Descriptor:
+    _layers: list[OverlayLayerDescriptor | EmptyDescriptor]
     if slots and rootfs is not None:
         _layer, _diff_id, _files = _add_layer(rootfs, slots, resource_dir)
         _layers = [_layer]
-        _config = ParameterSetConfig(
+        _config = OverlayConfig(
             name=name,
             version=version,
             slots=slots,
@@ -220,72 +220,72 @@ def _write_set(
         _layers = [
             EmptyDescriptor.add_contents_to_resource_dir(EMPTY_JSON, resource_dir)
         ]
-        _config = ParameterSetConfig(name=name, version=version)
+        _config = OverlayConfig(name=name, version=version)
     _annotations = {
         PLATFORM_ECU: image_id.ecu_id,
         OTA_RELEASE_KEY: image_id.release_key.value,
-        PARAMETER_SET_VERSION: version,
+        OVERLAY_VERSION: version,
     }
-    _manifest = ParameterSetManifest(
-        config=ParameterSetConfig.Descriptor.export_metafile_to_resource_dir(
+    _manifest = OverlayManifest(
+        config=OverlayConfig.Descriptor.export_metafile_to_resource_dir(
             _config, resource_dir
         ),
         layers=_layers,
-        annotations=ParameterSetManifest.Annotations.model_validate(_annotations),
+        annotations=OverlayManifest.Annotations.model_validate(_annotations),
     )
-    return ParameterSetManifest.Descriptor.export_metafile_to_resource_dir(
+    return OverlayManifest.Descriptor.export_metafile_to_resource_dir(
         _manifest, resource_dir, annotations=_annotations
     )
 
 
-def add_parameter_set(
+def add_overlay(
     *,
     index: ImageIndex,
     resource_dir: Path,
     image_id: ImageIdentifier,
-    slots: list[ParameterSlot],
+    slots: list[OverlaySlot],
     rootfs: Path | None,
     name: str,
     version: str,
-) -> ParameterSetManifest.Descriptor:
-    """Write the set's layer, config and manifest into `resource_dir` and add its
-    entry to `index`; no slot makes an empty set.
+) -> OverlayManifest.Descriptor:
+    """Write the overlay's layer, config and manifest into `resource_dir` and add its
+    entry to `index`; no slot makes an empty overlay.
 
-    Raises ParameterSetError for inputs that make no valid set, without leaving a blob
-    behind; anything else that fails is raised as it is, after the set's new blobs are
-    removed.
+    Raises OverlayError for inputs that make no valid overlay, without leaving a blob
+    behind; anything else that fails is raised as it is, after the overlay's new blobs
+    are removed.
     """
-    # what refuses the set is checked before anything is written, so that a refused
-    #   set costs no compression; should writing fail all the same, its new blobs go
+    # what refuses the overlay is checked before anything is written, so that a refused
+    #   overlay costs no compression; should writing fail all the same, its new blobs go
     if carries_base_payload(index):
-        raise ParameterSetError(
-            "the image carries a base payload (file-based or partition-based): a "
-            "parameter set goes into a parameter image of its own"
+        raise OverlayError(
+            "the image carries a base payload (file-based or partition-based): an "
+            "overlay goes into an overlay image of its own"
         )
     if not SLOT_NAME.fullmatch(name):
-        raise ParameterSetError(f"set name {name!r} is not a valid name")
+        raise OverlayError(f"overlay name {name!r} is not a valid name")
     if not VERSION.fullmatch(version):
-        raise ParameterSetError(f"set version {version!r} is not a valid version")
+        raise OverlayError(f"overlay version {version!r} is not a valid version")
     if index.find_image_payload(image_id) is not None:
-        raise ParameterSetError(
+        raise OverlayError(
             f"the image already carries a payload for {_payload_id(image_id)}"
         )
     try:
-        check_slots("parameter set", slots)
+        check_slots("overlay", slots)
     except ValueError as e:
-        raise ParameterSetError(str(e)) from e
+        raise OverlayError(str(e)) from e
     if slots and rootfs is None:
-        raise ParameterSetError("a set that fills a slot needs the tree")
+        raise OverlayError("an overlay that fills a slot needs the tree")
     if rootfs is not None:
         check_slots_in_rootfs(rootfs, slots)
-        # an apply inside the slots is a file of the set: the tree must carry it
+        # an apply inside the slots is a file of the overlay: the tree must carry it
         try:
-            check_applies_in_set(rootfs, slots)
+            check_applies_in_overlay(rootfs, slots)
         except ValueError as e:
-            raise ParameterSetError(f"{e} (in --rootfs {rootfs})") from e
+            raise OverlayError(f"{e} (in --rootfs {rootfs})") from e
     try:
         with _discard_new_blobs_on_failure(resource_dir):
-            _descriptor = _write_set(
+            _descriptor = _write_overlay(
                 resource_dir=resource_dir,
                 image_id=image_id,
                 slots=slots,
@@ -295,10 +295,10 @@ def add_parameter_set(
             )
             index.add_image(_descriptor)
     # what the tree or the libs' checks refuse; other errors are raised as they are
-    except (ParameterLayerInvalid, ValueError, OSError) as e:
-        raise ParameterSetError(f"cannot make the parameter set: {e}") from e
+    except (OverlayLayerInvalid, ValueError, OSError) as e:
+        raise OverlayError(f"cannot make the overlay: {e}") from e
     logger.info(
-        f"parameter set {name} {version} for {_payload_id(image_id)}: "
+        f"overlay {name} {version} for {_payload_id(image_id)}: "
         f"{json.dumps({_s.name: _s.apply for _s in slots})}"
     )
     return _descriptor

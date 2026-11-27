@@ -32,7 +32,7 @@ from pydantic import ValidationError
 
 from ota_image_builder._common import check_if_valid_ota_image, exit_with_err_msg
 from ota_image_builder.cmds._utils import parse_sys_config_specs, validate_annotations
-from ota_image_builder.v1._parameter_set import carries_parameter_set
+from ota_image_builder.v1._overlay import carries_overlay
 from ota_image_builder.v1._partition_image import (
     DEFAULT_ZSTD_LEVEL,
     AddPartitionImageAnnotations,
@@ -150,9 +150,9 @@ def add_partition_image_cmd(args: Namespace) -> None:
     image_index = index_helper.image_index
     if image_index.image_finalized or image_index.image_signed:
         exit_with_err_msg("Modifying an already finalized image is NOT allowed, abort!")
-    if carries_parameter_set(image_index):
+    if carries_overlay(image_index):
         exit_with_err_msg(
-            "The image is a parameter image: it carries parameter sets only, "
+            "The image is an overlay image: it carries overlays only, "
             "no partition-based payload."
         )
 

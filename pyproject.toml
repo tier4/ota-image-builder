@@ -26,7 +26,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "ota-image-libs@https://github.com/tier4/ota-image-libs/releases/download/v0.9.0/ota_image_libs-0.9.0-py3-none-any.whl#sha256:9995e13f7193e6b6efef4140e0cbca9488ea9ccf4b3c160718fbf886b292adbf",
+    "ota-image-libs@https://github.com/tier4/ota-image-libs/releases/download/v0.10.0/ota_image_libs-0.10.0-py3-none-any.whl#sha256:397a1256481f975713eee94805b0d78bff8450be2a63d88bf103fc4cfa737a51",
     # via ota-image-libs, unfortunately github cannot see through indirect deps
     #   introduced via dep specified by wheel package.
     # based on ota-image-libs deps, add more restrictions to version range.
